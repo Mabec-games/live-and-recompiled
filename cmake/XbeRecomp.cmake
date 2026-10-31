@@ -23,6 +23,10 @@ set(SDL_RENDER OFF CACHE BOOL "" FORCE)
 set(SDL_GPU OFF CACHE BOOL "" FORCE)
 set(SDL_CAMERA OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(SDL3 GIT_REPOSITORY https://github.com/libsdl-org/SDL.git GIT_TAG release-3.4.16 GIT_SHALLOW TRUE)
+# Setup's window. The launcher branch builds Setup without it (OFF): Conker: Recomped & Reloaded's launcher runs Setup
+# from the command line and is the window, and without FLTK Setup needs no X11, Wayland, Pango or Cairo libraries, so
+# it runs on any system (a container, a Wayland-only desktop) with glibc alone
+option(XBE_SETUP_WINDOW "Setup's FLTK window (off: command line only, no graphics libraries needed)" OFF)
 # FLTK for Setup's window: static, Wayland and X11 both (it picks at run time; Pango and Cairo draw on Wayland), and the
 # Win32 API on Windows. Its bundled image libraries and libdecor (cairo title bars), no GL, D-Bus, tools or tests, and of
 # X11's extensions only the ones Xft needs, so the window asks a desktop for as few libraries as possible
@@ -58,7 +62,10 @@ foreach(option ENABLE_OPT ENABLE_GLSLANG_BINARIES ENABLE_SPVREMAPPER ENABLE_PCH 
 endforeach()
 set(ENABLE_HLSL ON CACHE BOOL "" FORCE)
 FetchContent_Declare(glslang GIT_REPOSITORY https://github.com/KhronosGroup/glslang.git GIT_TAG 15.0.0 GIT_SHALLOW TRUE)
-FetchContent_MakeAvailable(zydis tomlplusplus imgui roboto SDL3 miniz vulkan_headers volk vma glslang fltk)
+FetchContent_MakeAvailable(zydis tomlplusplus imgui roboto SDL3 miniz vulkan_headers volk vma glslang)
+if(XBE_SETUP_WINDOW)
+    FetchContent_MakeAvailable(fltk)
+endif()
 
 # Codegen runs on the host. By default it is this build's own xbe_recomp, which works when the target runs here
 # (a native build, or Windows on Windows); cross compiling for another OS, set XBE_CODEGEN_TOOL to a native one's path.
@@ -88,7 +95,12 @@ target_link_libraries(xbe_symbols PRIVATE Zydis tomlplusplus::tomlplusplus)
 
 # Setup, the player-side build: finds the game, recompiles it and links it with a prebuilt host (add_xbe_player_kit),
 # from a window or the command line
-add_executable(setup ${XBE_ROOT_DIR}/src/setup/main.cpp ${XBE_ROOT_DIR}/src/setup/gui.cpp
+if(XBE_SETUP_WINDOW)
+    set(XBE_SETUP_WINDOW_SOURCE ${XBE_ROOT_DIR}/src/setup/gui.cpp)
+else()
+    set(XBE_SETUP_WINDOW_SOURCE ${XBE_ROOT_DIR}/src/setup/gui_none.cpp)
+endif()
+add_executable(setup ${XBE_ROOT_DIR}/src/setup/main.cpp ${XBE_SETUP_WINDOW_SOURCE}
     ${XBE_ROOT_DIR}/src/setup/store.cpp
     ${XBE_ROOT_DIR}/src/runtime/kernel/disc.cpp
     ${XBE_ROOT_DIR}/src/runtime/kernel/crypto.cpp)
@@ -100,10 +112,15 @@ else()
 endif()
 target_include_directories(setup PRIVATE ${XBE_ROOT_DIR}/src/runtime)
 target_compile_definitions(setup PRIVATE _CRT_SECURE_NO_WARNINGS)
-target_link_libraries(setup PRIVATE tomlplusplus::tomlplusplus miniz fltk $<$<PLATFORM_ID:Windows>:winhttp>)
+target_link_libraries(setup PRIVATE tomlplusplus::tomlplusplus miniz $<$<PLATFORM_ID:Windows>:winhttp>)
+if(XBE_SETUP_WINDOW)
+    target_link_libraries(setup PRIVATE fltk)
+endif()
 # Zig builds use its own libc headers, so the X11 and Wayland ones FLTK includes are found after them, as for SDL (cmake/zig-glibc.cmake)
 if(XBE_ZIG_TARGET AND NOT WIN32)
-    target_compile_options(fltk PRIVATE -idirafter /usr/include)
+    if(XBE_SETUP_WINDOW)
+        target_compile_options(fltk PRIVATE -idirafter /usr/include)
+    endif()
     target_compile_options(setup PRIVATE -idirafter /usr/include)
     # the system's X11, Wayland and Cairo libraries were built against a newer glibc than the one Zig links against, the player's has theirs
     target_link_options(setup PRIVATE -Wl,--allow-shlib-undefined)
