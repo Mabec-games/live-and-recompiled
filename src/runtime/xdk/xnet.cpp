@@ -28,11 +28,15 @@
 #endif
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <thread>
 #include <array>
 #include <random>
 
 #include "app/app.h"
 #include "xdk/hle.h"
+#include "xdk/xnet_wire.h"
 
 using kernel::HostPtr;
 using kernel::R16;
@@ -75,9 +79,8 @@ struct Socket {
     sockaddr_in to{};          // UDP: the address connect gave (the title's), sin_family 0 for none
 };
 
-// on the wire: kMagic, then the sender's and the receiver's link ports
-constexpr uint16_t kMagic = 0x4B43;  // "CK"
-constexpr int kWireHeader = 6;
+// on the wire: a plain or keyed header (xnet_wire.h), then the title's datagram
+constexpr int kWireHeader = xnet_wire::kMaxHeader;  // room for either header
 // into a socket's inbox: the sender's address, then its link port
 constexpr int kInboxHeader = 8;
 constexpr uint16_t kFirstEphemeral = 49152;
@@ -126,6 +129,74 @@ std::mutex g_peer_lock;
 std::vector<Peer> g_peers;
 int g_last_remote = -1;  // the last peer past the LAN a packet came from
 
+// Traffic, for working out what hosting needs: bytes and datagrams on the system link port, per peer by number and
+// for broadcasts, logged every kTrafficPeriod while there is any. Never an address. Slot 0 is broadcasts and
+// datagrams from no known peer, slot i the peer g_peers[i - 1]; peers past the last slot share it.
+constexpr size_t kTrafficSlots = 65;
+constexpr int kTrafficPeriod = 30;  // seconds
+constexpr int kIpUdpHeader = 28;    // what IPv4 and UDP add to every datagram on the internet
+struct Traffic {
+    std::atomic<uint64_t> out_bytes{0}, out_packets{0}, in_bytes{0}, in_packets{0};
+};
+Traffic g_traffic[kTrafficSlots];
+
+// the online room's key (the system_link_key setting, from a room code; 0 none), and datagrams refused by verdict
+uint32_t g_key = 0;
+std::atomic<uint64_t> g_refused[5]{};
+
+// the slot of a real address, with g_peer_lock taken here
+size_t TrafficSlot(const Endpoint& at) {
+    std::lock_guard<std::mutex> lock(g_peer_lock);
+    for (size_t i = 0; i < g_peers.size(); i++)
+        if (g_peers[i].at == at) return std::min(i + 1, kTrafficSlots - 1);
+    return 0;
+}
+
+void CountOut(size_t slot, int bytes) {
+    g_traffic[slot].out_bytes += uint64_t(bytes + kIpUdpHeader);
+    g_traffic[slot].out_packets++;
+}
+void CountIn(size_t slot, int bytes) {
+    g_traffic[slot].in_bytes += uint64_t(bytes + kIpUdpHeader);
+    g_traffic[slot].in_packets++;
+}
+
+void TrafficReport() {
+    uint64_t last[kTrafficSlots][4] = {};
+    for (;;) {
+        std::this_thread::sleep_for(std::chrono::seconds(kTrafficPeriod));
+        uint64_t d[kTrafficSlots][4];
+        uint64_t up = 0, down = 0, up_p = 0, down_p = 0;
+        for (size_t i = 0; i < kTrafficSlots; i++) {
+            const uint64_t now[4] = {g_traffic[i].out_bytes, g_traffic[i].out_packets, g_traffic[i].in_bytes,
+                                     g_traffic[i].in_packets};
+            for (int k = 0; k < 4; k++) d[i][k] = now[k] - last[i][k], last[i][k] = now[k];
+            up += d[i][0], up_p += d[i][1], down += d[i][2], down_p += d[i][3];
+        }
+        static uint64_t refused_last[5] = {};
+        uint64_t refused[5];
+        for (int v = 0; v < 5; v++) refused[v] = g_refused[v] - refused_last[v], refused_last[v] = g_refused[v];
+        if (refused[int(xnet_wire::Verdict::NoKey)] || refused[int(xnet_wire::Verdict::WrongKey)] ||
+            refused[int(xnet_wire::Verdict::OtherBuild)])
+            LOGR("xnet: refused over %d s: %llu without this room's key, %llu with another room's key, %llu from "
+                 "another game build", kTrafficPeriod, (unsigned long long)refused[int(xnet_wire::Verdict::NoKey)],
+                 (unsigned long long)refused[int(xnet_wire::Verdict::WrongKey)],
+                 (unsigned long long)refused[int(xnet_wire::Verdict::OtherBuild)]);
+        if (!up && !down) continue;
+        auto kbit = [](uint64_t bytes) { return double(bytes) * 8.0 / 1000.0 / kTrafficPeriod; };
+        auto pps = [](uint64_t packets) { return double(packets) / kTrafficPeriod; };
+        LOGR("xnet: traffic over %d s: up %.1f kbit/s (%.0f packets/s), down %.1f kbit/s (%.0f packets/s), "
+             "headers included", kTrafficPeriod, kbit(up), pps(up_p), kbit(down), pps(down_p));
+        for (size_t i = 0; i < kTrafficSlots; i++) {
+            if (!d[i][0] && !d[i][2]) continue;
+            const std::string who = i ? "peer " + std::to_string(i) + (i == kTrafficSlots - 1 ? "+" : "")
+                                      : std::string("broadcasts");
+            LOGR("xnet:   %s: up %.1f kbit/s (%.0f/s), down %.1f kbit/s (%.0f/s)", who.c_str(), kbit(d[i][0]),
+                 pps(d[i][1]), kbit(d[i][2]), pps(d[i][3]));
+        }
+    }
+}
+
 std::string Ip(uint32_t a) {
     char s[32];
     std::snprintf(s, sizeof(s), "%u.%u.%u.%u", a & 0xFF, (a >> 8) & 0xFF, (a >> 16) & 0xFF, a >> 24);
@@ -159,7 +230,7 @@ int AddPeer(const Endpoint& at) {
     if (int i = FindPeer(at); i >= 0) return i;
     if (g_peers.size() >= kMaxPeers) return -1;
     g_peers.push_back({at});
-    LOGR("xnet: peer %s:%u is %s", Ip(at.ip).c_str(), ntohs(at.port), Ip(Opaque(g_peers.size() - 1)).c_str());
+    LOGR("xnet: peer %zu seen", g_peers.size());  // by number only: logs carry no addresses
     return int(g_peers.size() - 1);
 }
 
@@ -193,8 +264,7 @@ Endpoint JoinAddress() {
         freeaddrinfo(res);
     }
     if (!text.empty())
-        LOGR("xnet: join %s -> %s", text.c_str(),
-             address.ip ? (Ip(address.ip) + ":" + std::to_string(port)).c_str() : "not found");
+        LOGR("xnet: join address %s", address.ip ? "resolved" : "not found");
     return address;
 }
 
@@ -227,9 +297,10 @@ void Init() {
             std::lock_guard<std::recursive_mutex> ui(app::UiLock());
             uint32_t p = app::PortArg() ? uint32_t(app::PortArg()) : app::Get().system_link_port;
             if (p && p <= 0xFFFF) g_port = uint16_t(p);
+            g_key = app::Get().system_link_key;
         }
-        LOGR("xnet: %s address %s, system link on UDP %u", g_instance ? "loopback instance" : "LAN",
-             Ip(g_local).c_str(), g_port);
+        LOGR("xnet: system link on UDP %u (%s)%s", g_port, g_instance ? "loopback instance" : "LAN",
+             g_key ? ", in an online room (its key required from past this network)" : "");
         g_link = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         BOOL on = 1, off = FALSE;
         DWORD ret = 0;
@@ -242,12 +313,13 @@ void Init() {
         if (::bind(g_link, reinterpret_cast<sockaddr*>(&at), sizeof(at)) != 0) {
             int e = WSAGetLastError();
             g_link_error = e;
-            LOGR("xnet: system link can't bind %s (%d)%s", Addr(at).c_str(), e,
+            LOGR("xnet: system link can't bind UDP %u (%d)%s", g_port, e,
                  e == WSAEADDRINUSE ? ": the port is in use, by another copy? Give each its own system link port" : "");
         }
         g_ready = true;
         std::thread(Pump).detach();
         std::thread(LinkPump).detach();
+        std::thread(TrafficReport).detach();
     });
 }
 
@@ -353,14 +425,16 @@ void LinkPump() {
             }
             continue;
         }
-        uint16_t magic, from_vport, vport;
-        std::memcpy(&magic, buf.data(), 2);
-        if (n < kWireHeader || magic != htons(kMagic)) continue;  // not one of ours, or an inbox's own header
-        std::memcpy(&from_vport, buf.data() + 2, 2);
-        std::memcpy(&vport, buf.data() + 4, 2);
         Endpoint from{Fold(src.sin_addr.s_addr), src.sin_port};
         if (from.ip == g_local && from.port == htons(g_port)) continue;  // its own broadcast
-        Deliver(from, from_vport, vport, buf.data() + kWireHeader, n - kWireHeader);
+        xnet_wire::Header h;
+        const auto verdict = xnet_wire::Read(buf.data(), n, g_key, Private(src.sin_addr.s_addr), &h);
+        if (verdict != xnet_wire::Verdict::Accept) {
+            if (verdict != xnet_wire::Verdict::NotOurs) g_refused[int(verdict)]++;  // counted, never logged with who
+            continue;  // not one of ours, an inbox's own header, or not this room's
+        }
+        Deliver(from, htons(h.from), htons(h.to), buf.data() + h.size, n - h.size);
+        CountIn(TrafficSlot(from), n);  // after Deliver: a new peer has its number by now
     }
 }
 
@@ -417,11 +491,6 @@ int SendOnce(uint32_t sock, const Socket& k, const uint8_t* data, int len, const
     uint16_t from_vport = k.vport ? k.vport : AutoBind(sock);
     thread_local std::vector<uint8_t> buf(65536 + kWireHeader);
     len = std::min(len, 65536);
-    const uint16_t magic = htons(kMagic);
-    std::memcpy(buf.data(), &magic, 2);
-    std::memcpy(buf.data() + 2, &from_vport, 2);
-    std::memcpy(buf.data() + 4, &dest.sin_port, 2);
-    std::memcpy(buf.data() + kWireHeader, data, size_t(len));
     auto send = [&](const Endpoint& e) {
         if (e.ip == g_local && e.port == htons(g_port)) {  // to itself, past the wire
             Deliver(e, from_vport, dest.sin_port, data, len);
@@ -431,8 +500,13 @@ int SendOnce(uint32_t sock, const Socket& k, const uint8_t* data, int len, const
         a.sin_family = AF_INET;
         a.sin_addr.s_addr = e.ip;
         a.sin_port = e.port;
-        int n = ::sendto(g_link, reinterpret_cast<const char*>(buf.data()), len + kWireHeader, 0,
+        // keyed past this network in an online room, plain on it (and the LAN broadcast)
+        const bool local = e.ip == INADDR_BROADCAST || Private(e.ip);
+        const int header = xnet_wire::Write(buf.data(), g_key, local, ntohs(from_vport), ntohs(dest.sin_port));
+        std::memcpy(buf.data() + header, data, size_t(len));
+        int n = ::sendto(g_link, reinterpret_cast<const char*>(buf.data()), len + header, 0,
                          reinterpret_cast<const sockaddr*>(&a), sizeof(a));
+        if (n > 0) CountOut(e.ip == INADDR_BROADCAST ? 0 : TrafficSlot(e), n);
         return n < 0 ? n : len;
     };
     if (dest.sin_addr.s_addr != INADDR_BROADCAST) return send(ToReal(dest.sin_addr.s_addr));
@@ -654,8 +728,7 @@ HLE_STDCALL(XNetXnAddrToInAddr, 3) {
     if (!p.has_xnaddr) {
         std::memcpy(p.xnaddr.data(), x, kXnAddrSize);
         p.has_xnaddr = true;
-        LOGR("xnet: %s is the XNADDR %s:%u", Ip(Opaque(size_t(i))).c_str(), Ip(R32(a[0])).c_str(),
-             ntohs(R16(a[0] + kXnAddrPort)));
+        LOGR("xnet: peer %d has its XNADDR", i + 1);
     }
     W32(a[2], Opaque(size_t(i)));
     return 0;
@@ -852,10 +925,10 @@ HLE_STDCALL(bind, 3) {
     if (g_instance && at.sin_addr.s_addr == INADDR_ANY) at.sin_addr.s_addr = g_local;
     if (::bind(k.s, reinterpret_cast<sockaddr*>(&at), sizeof(at)) != 0) {
         int e = HostError();
-        LOGR("xnet: bind %X (TCP) to %s failed (%d)", a[0], Addr(at).c_str(), e);
+        LOGR("xnet: bind %X (TCP) to port %u failed (%d)", a[0], ntohs(at.sin_port), e);
         return Fail(e);
     }
-    LOGR("xnet: bind %X (TCP) to %s", a[0], Addr(at).c_str());
+    LOGR("xnet: bind %X (TCP) to port %u", a[0], ntohs(at.sin_port));
     return 0;
 }
 HLE_STDCALL(connect, 3) {
@@ -891,7 +964,7 @@ HLE_STDCALL(accept, 3) {
         if (s != INVALID_SOCKET) {
             if (a[1]) std::memcpy(HostPtr(a[1]), &from, sizeof(from));
             if (a[2]) W32(a[2], sizeof(from));
-            LOGI("xnet: accept %X from %s", a[0], Addr(from).c_str());
+            LOGI("xnet: accept %X", a[0]);
             return AddSocket(s, false);
         }
         int e = WSAGetLastError();

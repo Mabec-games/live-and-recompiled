@@ -43,6 +43,8 @@ struct Settings {
     std::string aspect = "auto";     // "W:H" ("4:3", "16:9", "21:9", ...), or "auto": the output's own shape
     std::string join_ip;              // host[:port]: a system link host past the LAN (or on this PC) the search also asks
     uint32_t system_link_port = 3074;  // the UDP port system link binds, read as the network starts
+    // an online room's key, from the launcher's room code (0 none: system link as before); read as the network starts
+    uint32_t system_link_key = 0;
 };
 
 Settings& Get();

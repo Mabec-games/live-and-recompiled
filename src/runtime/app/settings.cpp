@@ -76,6 +76,7 @@ void Load() {
     s.aspect = t["aspect"].value_or(s.aspect);
     s.join_ip = t["join_ip"].value_or(s.join_ip);
     s.system_link_port = t["system_link_port"].value_or(s.system_link_port);
+    s.system_link_key = uint32_t(t["system_link_key"].value_or(int64_t(s.system_link_key)));
     input::SetAutoAssign(t["auto_controllers"].value_or(input::AutoAssign()));
     for (int p = 0; p < input::kPorts; p++) {
         const toml::table* player = t["player" + std::to_string(p + 1)].as_table();
@@ -119,6 +120,7 @@ toml::table Table() {
                   {"aspect", s.aspect},
                   {"join_ip", s.join_ip},
                   {"system_link_port", int64_t(s.system_link_port)},
+                  {"system_link_key", int64_t(s.system_link_key)},
                   {"auto_controllers", input::AutoAssign()}};
     for (int p = 0; p < input::kPorts; p++) {
         toml::table player;
