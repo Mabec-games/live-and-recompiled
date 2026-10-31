@@ -7,6 +7,7 @@
 #include "cpu/x86_ops.h"
 #include "kernel/memory.h"
 #include "xdk/hle.h"
+#include "core/log.h"
 
 #include "common/gamepad.h"
 #include "common/menus.h"
@@ -81,14 +82,25 @@ void gamepad::Pad(int port, input::Pad& pad) {
     start_was[port] = start;
     if (frontend && start) {
         pad.buttons &= uint16_t(~kStart);
-        if (start_pressed) ui::Show(ui::Tab::Last, port);
+        // the launcher build has no settings menu: Start (Esc on a keyboard) asks to quit, as Back does
+        if (start_pressed) {
+            if (ui::kLauncherSettings) ui::ShowQuit();
+            else ui::Show(ui::Tab::Last, port);
+        }
     }
     const bool back = pad.buttons & kBack;
     const bool back_pressed = back && !back_was[port];
     back_was[port] = back;
-    if (frontend && back) {
+    // Back is the game's way into Xbox Live (sign-in, accounts) in the frontends and in a level alike, and that waits
+    // forever without the service: the game never sees it. In the pub's own menu it asks to quit, and everywhere else
+    // it does nothing. Each press is logged with where it was, should Back turn out to be wanted somewhere
+    if (back) {
         pad.buttons &= uint16_t(~kBack);
-        if (back_pressed) ui::ShowQuit();
+        if (back_pressed) {
+            LOGR("input: Back in level %d (frontend ui %08X)%s", warp::CurrentLevel(), kernel::R32(kFrontendUi),
+                 frontend ? ", the quit prompt" : ", kept from the game (Xbox Live)");
+            if (frontend) ui::ShowQuit();
+        }
     }
     const bool down = pad.analog[0] > 0x40;  // A, past where the game takes it as pressed
     const bool pressed = down && !was_down[port];

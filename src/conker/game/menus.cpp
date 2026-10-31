@@ -88,6 +88,7 @@ uint32_t g_online_items = 0;  // the copy, in guest memory
 
 void ConkerOnlineItems(X86Context& ctx, uint8_t* base) {
     (void)base;
+    if (ui::kLauncherSettings) return;  // no settings menu for its Options to open
     if (!g_online_items) {
         uint32_t n = 0;
         while (R32(kOnlineItems + n * 12)) n++;

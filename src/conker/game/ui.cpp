@@ -692,17 +692,26 @@ void PadFrame(bool open, bool quit) {
     io.AddKeyEvent(ImGuiKey_GamepadDpadRight, drive.right || stick_right);
 }
 
-// the quit prompt's body. Cancel is where the pad starts, and B is Cancel too (ImGui's own back out leaves a modal up)
+// the quit prompt's body: Yes and No, No where the cursor starts. B, Esc and N are No too (ImGui's own back out leaves a
+// modal up), Y is Yes
 bool QuitBody() {
-    ImGui::TextUnformatted("Quit the game? Progress since the last save is lost.");
+    if (kLauncherSettings) ImGui::SetWindowFontScale(1.35f);  // the launcher build's only window: a clear one
+    ImGui::TextUnformatted("Quit the game?");
+    ImGui::TextDisabled("Progress since your last save will be lost.");
     ImGui::Dummy(ImVec2(0.0f, ImGui::GetFontSize() * 0.8f));
     const ImGuiStyle& st = ImGui::GetStyle();
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(st.FramePadding.x * 2.0f, st.FramePadding.y * 1.5f));
-    if (ImGui::Button("Quit")) app::Quit();  // only posts: the window thread closes
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(st.FramePadding.x * 3.0f, st.FramePadding.y * 1.5f));
+    if (ImGui::Button(kLauncherSettings ? "Yes" : "Quit") || (kLauncherSettings && ImGui::IsKeyPressed(ImGuiKey_Y, false)))
+        app::Quit();  // only posts: the window thread closes
     ImGui::SameLine();
-    const bool cancel = ImGui::Button("Cancel");
+    const bool cancel = ImGui::Button(kLauncherSettings ? "No" : "Cancel") ||
+                        (kLauncherSettings && ImGui::IsKeyPressed(ImGuiKey_N, false));
     ImGui::SetItemDefaultFocus();
     ImGui::PopStyleVar();
+    if (kLauncherSettings) {
+        ImGui::Dummy(ImVec2(0.0f, ImGui::GetFontSize() * 0.4f));
+        ImGui::TextDisabled("Arrows or d-pad to choose, Enter or A to confirm. Esc or B: No.");
+    }
     return !cancel && !g_pad.b;
 }
 
@@ -1173,6 +1182,7 @@ bool Message(void* hwnd, uint32_t msg, uintptr_t wp, intptr_t lp, intptr_t* resu
             // F1 opens and shuts the menu; Esc shuts it or the prompt, and otherwise is the game's Start (EscStart)
             if ((wp == kEscape || wp == kF1) && !(lp & (1 << 30)) && !(wp == kEscape && g_rebinding.load())) {
                 if (wp == kF1) {
+                    if (kLauncherSettings) break;
                     g_quit.store(false);
                     g_owner.store(-1);
                     SetOpen(!g_open.load());
@@ -1215,6 +1225,7 @@ bool Message(void* hwnd, uint32_t msg, uintptr_t wp, intptr_t lp, intptr_t* resu
 bool Open() { return g_open.load() || g_quit.load(); }
 
 void Show(Tab tab, int port) {
+    if (kLauncherSettings) return;
     if (tab == Tab::Controls) g_tab_target.store(kControlsTab);
     else if (tab == Tab::Multiplayer) g_tab_target.store(kMultiplayerTab);
     g_quit.store(false);

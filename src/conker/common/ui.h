@@ -9,6 +9,12 @@
 // real Win32 headers are absent, so nothing here may pull either in.
 namespace ui {
 
+// Launcher build: every setting is made in the external launcher (settings.toml, written before launch), so the
+// settings menu never shows: F1 and Start + Back do nothing, the Options items that opened it do nothing (the Online Play
+// menu's extra one is not added), and in a level Esc is only the game's Start. In the frontend's menu Start, Esc, Back
+// and Backspace ask to quit (Yes / No); the window's close button quits at once
+inline constexpr bool kLauncherSettings = true;
+
 // the GameInfo::ui hook: drawn inside the ImGui frame on the render thread, with app::UiLock held
 void Draw(double fps);
 
