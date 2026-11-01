@@ -40,6 +40,7 @@ const app::GameInfo app::kGame = {
     .options = {{"fps_overlay", &ui::g_fps_overlay, nullptr},  // ImGui settings menu options (src/conker/game/ui.cpp)
                 {"fps_in_title", &ui::g_fps_title, nullptr},
                 {"frame_rate", nullptr, &display::g_frame_rate},  // 30, 60, 120, 180 or 240 (src/conker/game/display.cpp)
+                {"console_timing", &display::g_console_timing, nullptr},  // the game at 30, the rest interpolated (display.cpp)
                 {"skippable_cutscenes", &cutscenes::g_skippable, nullptr},  // LT skips any cutscene (hooks.cpp)
                 {"rope_physics", &rope::g_physics, nullptr},  // ropes swing as a weighted chain (rope.cpp)
                 {"grass_wind", &grass::g_wind, nullptr},  // distant grass sways too (hooks.cpp)

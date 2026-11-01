@@ -44,6 +44,7 @@ uint32_t g_frame_rate = 60;
 #else
 uint32_t g_frame_rate = 30;
 #endif
+bool g_console_timing = false;
 
 namespace {
 
@@ -52,6 +53,7 @@ constexpr uint32_t kIntervalImmediate = 0x80000000u;
 
 constexpr uint32_t kGameMost = 60;     // the ticks are 60ths of a second: the game runs no faster
 constexpr uint32_t kShownMost = 240;   // four pictures a frame, the most the runtime draws
+constexpr uint32_t kGenMost = 4;       // the runtime's most pictures a frame (kMaxGen, src/runtime/gpu/vulkan.cpp)
 
 // 30, or a multiple of 60 up to kShownMost
 uint32_t Clamp(uint32_t r) { return r <= 30 ? 30 : std::min((r + kGameMost / 2) / kGameMost * kGameMost, kShownMost); }
@@ -62,11 +64,15 @@ uint32_t Shown() {
         const char* e = std::getenv("XBE_FRAME_RATE");
         return e ? uint32_t(std::atoi(e)) : 0u;
     }();
-    return Clamp(env ? env : g_frame_rate);
+    uint32_t r = Clamp(env ? env : g_frame_rate);
+    // console timing: the game at 30, so 30 times the most pictures a frame at most
+    return g_console_timing ? std::min(r, 30 * kGenMost) : r;
 }
 
-// the game's: 30 (the console's) or 60, past which the runtime draws the frames between
-uint32_t Rate() { return std::min(Shown(), kGameMost); }
+// the game's: 30 (the console's) or 60, past which the runtime draws the frames between. Console timing keeps the
+// game at 30 whatever is shown, the frames past 30 all drawn between: the console's own steps, without the 60 FPS
+// patch's quirks (Conker dying on the barn roof in Barn Boys at 60), for controls that answer at 30
+uint32_t Rate() { return g_console_timing ? 30 : std::min(Shown(), kGameMost); }
 
 }  // namespace
 
@@ -74,6 +80,7 @@ void SetFrameRate(uint32_t rate) {
     g_frame_rate = Clamp(rate);
     app::Get().fps_cap = Rate();
     app::Get().frame_generation = Shown() / Rate();
+    LOGR("display: game at %u FPS, %u shown%s", Rate(), Shown(), g_console_timing ? " (console timing)" : "");
 }
 
 uint32_t GameRate() { return Rate(); }

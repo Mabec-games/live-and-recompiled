@@ -52,6 +52,7 @@ constexpr int kFrontendLevels[] = {29, 33, 34, 70, 71};
 constexpr uint32_t kLevel = 0x7FA1F8;
 constexpr uint32_t kLoadState = 0x7819D6;
 constexpr uint32_t kBusy1 = 0x76EC82, kBusy2 = 0x771130;
+constexpr uint32_t kFrontendUi = 0x85E550;  // the pub menu's UI page, set once it shows (gamepad.cpp)
 constexpr uint32_t kPlayer = 0x84A5F8;  // 0x4EC10 reads it first thing
 constexpr uint32_t kStartOverride = 0x849813, kStartCheckpoint = 0x849810;
 
@@ -265,9 +266,14 @@ std::string Status() {
 
 // main thread, from the frame timer (display.cpp): the level loop is running, so a level is loaded
 void Poll(X86Context& ctx) {
-    static bool env = (ReadEnv(), true);
-    (void)env;
     const int level = int(kernel::R32(kLevel));
+    // XBE_WARP and XBE_CUTSCENE wait for the pub's own menu (its UI page, [0x85E550]): taken during the boot logos,
+    // before the game has set itself up, the level came up black and deaf to the pads
+    static bool env = false;
+    if (!env && level == kFrontendLevels[0] && kernel::R32(kFrontendUi)) {
+        env = true;
+        ReadEnv();
+    }
     if (level != g_cutscenes_level) {
         // the running level's cutscenes, while its packages are loaded
         std::vector<int> found;

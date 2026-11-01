@@ -10,6 +10,9 @@ namespace display {
 // generation). XBE_FRAME_RATE overrides it. The headless harness keeps 30 unless asked, so its frame-counted pad
 // scripts hold.
 extern uint32_t g_frame_rate;
+// settings.toml console_timing: the game at 30 whatever frame_rate shows (60 or 120 then interpolated, 180 and 240
+// shown as 120), the console's own timing without the 60 FPS patch's quirks
+extern bool g_console_timing;
 // the frame rate set, the runtime's fps cap and frame generation with it: the one limit (GameInfo::init applies the
 // loaded one)
 void SetFrameRate(uint32_t rate);
