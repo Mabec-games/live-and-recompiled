@@ -142,6 +142,7 @@ echo "Also press F1 once: say whether the settings menu shows up (it's drawn apa
     export XBE_VERBOSE=1  # warnings too, with their threads: a test wants all of it
     if [ $DEBUG -eq 1 ]; then
         export XBE_VULKAN_DEBUG=1 XBE_CAPTURE_DIR=cap
+        export MVK_CONFIG_LOG_LEVEL=2  # MoltenVK's own warnings too
         export VK_LAYER_PATH="$BREW/opt/vulkan-validationlayers/share/vulkan/explicit_layer.d"
     fi
     exec ./Game

@@ -1838,6 +1838,10 @@ bool VulkanBackend::CreateSwapChain() {
     if (swap_) vkDestroySwapchainKHR(dev_, swap_, nullptr);
     swap_ = sc;
     swap_fmt_ = fmt.format;
+    LOG_FIRST(16, "vulkan: swap chain %ux%u (surface %ux%u, window %ux%u), format %d space %d, %u images, mode %d, alpha %X",
+              ci.imageExtent.width, ci.imageExtent.height, caps.currentExtent.width, caps.currentExtent.height,
+              WindowExtent().width, WindowExtent().height, int(fmt.format), int(fmt.colorSpace), count, int(mode),
+              unsigned(ci.compositeAlpha));
     bb_w_ = ci.imageExtent.width;
     bb_h_ = ci.imageExtent.height;
     vkGetSwapchainImagesKHR(dev_, swap_, &n, nullptr);
@@ -4812,6 +4816,7 @@ void VulkanBackend::UploadGammaRamp() {
 bool VulkanBackend::AcquireImage(uint32_t& bi, VkSemaphore acquired) {
     if (!swap_ || minimised_) return false;
     VkResult r = vkAcquireNextImageKHR(dev_, swap_, UINT64_MAX, acquired, VK_NULL_HANDLE, &bi);
+    if (r != VK_SUCCESS) LOG_FIRST(16, "vulkan: acquire %d", int(r));
     if (r == VK_SUBOPTIMAL_KHR) {
         swap_stale_ = true;
     } else if (r != VK_SUCCESS) {
@@ -5021,6 +5026,7 @@ void VulkanBackend::QueuePresent(uint32_t bi) {
     pi.pSwapchains = &swap_;
     pi.pImageIndices = &bi;
     VkResult r = vkQueuePresentKHR(queue_, &pi);
+    if (r != VK_SUCCESS) LOG_FIRST(16, "vulkan: present %d", int(r));
     if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) swap_stale_ = true;
 }
 
