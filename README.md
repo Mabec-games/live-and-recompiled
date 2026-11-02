@@ -42,7 +42,8 @@ Releases contain neither the game's code nor its assets. Setup performs the enti
 
 **Supported versions**
 - The USA disc release (`default.xbe` SHA-1 = `2232a1b3874d67b4bb4cf53a940420d2dab59535`)
-- The digital XBOX Backwards Compatibility release from the Microsoft Store (equivalent to the USA version).
+- The Europe disc release (`default.xbe` SHA-1 = `68a37f0d03d73dabc86a848df5ec1820dd551254`, the USA code and data with another header).
+- The digital XBOX Backwards Compatibility release from the Microsoft Store (the same `default.xbe` as the Europe disc).
 
 Download the release for your system, `LiveAndRecompiled-<version>-windows-x86_64.zip` or `LiveAndRecompiled-<version>-linux-x86_64.tar.gz`, and unpack it.
 Then it is two steps: run Setup, run the game.

@@ -25,8 +25,8 @@ if(NOT GAME_PARTITIONS)
     set(GAME_PARTITIONS 8)
 endif()
 
-# the Microsoft Store package's default.xbe: the disc's code and data, only the header (signature, certificate) is
-# different
+# the Europe disc's default.xbe, which is also the Microsoft Store package's: the USA disc's code and data, only the
+# header (signature, certificate: region, rating, version) is different
 set(XBE_ALSO_SHA1 68a37f0d03d73dabc86a848df5ec1820dd551254)
 
 # target name = GAME_EXE in tools/build.bat, xbe = GAME_XBE
