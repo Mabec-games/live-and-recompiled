@@ -12,6 +12,9 @@
 #define VK_USE_PLATFORM_WIN32_KHR
 #endif
 #define VK_NO_PROTOTYPES
+#ifdef __APPLE__
+#define VK_ENABLE_BETA_EXTENSIONS  // VK_KHR_portability_subset's features (MoltenVK) are a beta extension
+#endif
 #include <vulkan/vulkan.h>
 #define VOLK_IMPLEMENTATION
 #include <volk.h>
@@ -1178,6 +1181,7 @@ private:
     bool precise_ = false;
     bool demote_ = false;  // shaderDemoteToHelperInvocation: HLSL's discard and clip compile to it
     bool custom_border_ = false;
+    bool lod_bias_ = true;  // samplerMipLodBias: off on MoltenVK, whose samplers then take a bias of 0
     bool dynamic_rendering_ext_ = false;
     uint32_t custom_border_max_ = 0;
     uint32_t custom_borders_ = 0;
@@ -1739,7 +1743,15 @@ bool VulkanBackend::CreateDevice() {
         vkEnumerateDeviceExtensionProperties(phys_, nullptr, &en, nullptr);
         std::vector<VkExtensionProperties> dev_exts(en);
         vkEnumerateDeviceExtensionProperties(phys_, nullptr, &en, dev_exts.data());
-        if (HasExtension(dev_exts, "VK_KHR_portability_subset")) exts.push_back("VK_KHR_portability_subset");
+        if (HasExtension(dev_exts, "VK_KHR_portability_subset")) {
+            exts.push_back("VK_KHR_portability_subset");
+            // what the subset leaves out: a sampler's mip LOD bias must then be 0 (the game asks for -1 on some)
+            VkPhysicalDevicePortabilitySubsetFeaturesKHR sub{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PORTABILITY_SUBSET_FEATURES_KHR};
+            VkPhysicalDeviceFeatures2 sub_have{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &sub};
+            vkGetPhysicalDeviceFeatures2(phys_, &sub_have);
+            lod_bias_ = sub.samplerMipLodBias;
+            if (!lod_bias_) LOGR("vulkan: no sampler LOD bias on this driver, samplers take 0");
+        }
     }
 #endif
     VkDeviceCreateInfo ci{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, &f};
@@ -3375,7 +3387,7 @@ VkSampler VulkanBackend::MakeSampler(const SamplerDesc& sd) {
     ci.addressModeV = VkSamplerAddressMode(sd.v);
     ci.addressModeW = VkSamplerAddressMode(sd.w);
     float max_bias = props_.limits.maxSamplerLodBias;
-    ci.mipLodBias = std::clamp(sd.bias, -max_bias, max_bias);
+    ci.mipLodBias = lod_bias_ ? std::clamp(sd.bias, -max_bias, max_bias) : 0.0f;
     ci.anisotropyEnable = sd.aniso > 1 && aniso_;
     ci.maxAnisotropy = std::min(float(sd.aniso), props_.limits.maxSamplerAnisotropy);
     ci.compareEnable = sd.compare != 0;
