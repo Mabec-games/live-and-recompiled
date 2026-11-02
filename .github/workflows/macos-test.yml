@@ -1,0 +1,49 @@
+# macOS test build: only on the macos branch (this file is on no other), and never a release. GitHub's Apple Silicon
+# runner (an M1-class Mac) compiles what needs no disc: the tools (xbe_recomp, xbe_symbols, setup) and the game's host
+# library (the runtime, the game's hooks, ImGui) against ci/macos/image_symbols.h. The game itself is recompiled and
+# linked on a Mac with the disc (tools/macos-test.sh). Results stay in the run: its log, and the tools as an artifact.
+name: macOS test (not a release)
+
+on:
+  push:
+    branches: [macos]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tools
+        run: brew install ninja
+
+      - name: Configure (Apple clang, no disc)
+        run: cmake -S . -B out/build/macos -G Ninja -DCMAKE_BUILD_TYPE=Release -DXBE_HOST_CHECK=$PWD/ci/macos
+
+      - name: Build the tools
+        run: cmake --build out/build/macos --target xbe_recomp xbe_symbols setup
+
+      - name: Build the host library (runtime, hooks, ImGui)
+        # every error at once, not the first file's alone
+        run: cmake --build out/build/macos --target Game_host -- -k 0
+
+      - name: Upload the tools
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-tools
+          path: |
+            out/build/macos/xbe_recomp
+            out/build/macos/xbe_symbols
+            out/build/macos/setup
+          if-no-files-found: warn
+          retention-days: 14
