@@ -1008,6 +1008,8 @@ void Draw(double fps) {
 
             if (tab("Audio")) {
                 Slider("Volume %", &s.volume, 0, 100, app::Settings{}.volume);
+                Slider("Cutscene volume +dB", &cutscenes::g_volume_db, 0, 12, 0);
+                Hint("Cutscenes play quieter than the rest of the game: this raises them while one plays.", true);
                 {
                     static std::vector<audio::Device> devices;
                     if (devices.empty() || ImGui::IsWindowAppearing()) devices = audio::Devices();

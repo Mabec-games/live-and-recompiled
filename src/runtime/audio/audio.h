@@ -24,6 +24,10 @@ void Play(Cue cue);
 // adds the playing ones to interleaved stereo frames; the output's callback calls it after the game's mix
 void MixCues(float* out, uint32_t frames);
 
+// a title's own gain over the game's sound, asked once per mixed block on the audio thread (Conker: its cutscenes,
+// louder by a setting); null or 1 is none. Set before the title boots
+inline float (*g_title_gain)() = nullptr;
+
 // the platform output pulls interleaved stereo float frames from render
 void StartOutput(std::function<void(float* out, uint32_t frames)> render);
 
