@@ -73,33 +73,68 @@ Dev& Add(Kind kind, uint64_t id, const std::string& name) {
     return g_devices.back();
 }
 
+// written in release builds too, so a report on a pad that misbehaves says what the game opened and how: the GUID's
+// driver byte and the path tell XInput from DirectInput or HIDAPI, the mapping how its buttons are read
+void LogPad(const Dev& d) {
+    SDL_Gamepad* pad = d.pad;
+    SDL_JoystickID id = SDL_GetGamepadID(pad);
+    char guid[64];
+    SDL_GUIDToString(SDL_GetGamepadGUIDForID(id), guid, sizeof(guid));
+    const char* conn = "unknown";
+    switch (SDL_GetGamepadConnectionState(pad)) {
+    case SDL_JOYSTICK_CONNECTION_WIRED: conn = "wired"; break;
+    case SDL_JOYSTICK_CONNECTION_WIRELESS: conn = "wireless"; break;
+    case SDL_JOYSTICK_CONNECTION_INVALID: conn = "invalid"; break;
+    default: break;
+    }
+    const char* path = SDL_GetGamepadPath(pad);
+    LOGR("input: controller %s connected: vid %04x pid %04x, type %s, %s, guid %s, path %s", d.key.c_str(),
+         SDL_GetGamepadVendor(pad), SDL_GetGamepadProduct(pad),
+         SDL_GetGamepadStringForType(SDL_GetGamepadType(pad)) ? SDL_GetGamepadStringForType(SDL_GetGamepadType(pad)) : "?",
+         conn, guid, path ? path : "-");
+    if (char* mapping = SDL_GetGamepadMapping(pad)) {
+        LOGR("input: controller %s mapping: %s", d.key.c_str(), mapping);
+        SDL_free(mapping);
+    } else {
+        LOGR("input: controller %s has no mapping", d.key.c_str());
+    }
+}
+
 void AddPad(SDL_JoystickID id) {
     if (Find(Kind::Controller, id)) return;
     SDL_Gamepad* pad = SDL_OpenGamepad(id);
     if (!pad) {
-        LOGI("input: controller failed to open: %s", SDL_GetError());
+        const char* name = SDL_GetGamepadNameForID(id);
+        LOGR("input: controller %s failed to open: %s", name ? name : "?", SDL_GetError());
         return;
     }
     const char* name = SDL_GetGamepadName(pad);
     Dev& d = Add(Kind::Controller, id, name && *name ? name : "Controller");
     d.pad = pad;
+    LogPad(d);
     if (!g_auto.load() || std::any_of(std::begin(g_slots), std::end(g_slots), [&](const std::string(&s)[kKinds]) {
             return s[int(Kind::Controller)] == d.key;
-        }))
+        })) {
+        int owner = OwnerOf(d);
+        if (owner >= 0) LOGR("input: controller %s is player %d's", d.key.c_str(), owner + 1);
+        else LOGR("input: controller %s has no player (automatic assignment is off)", d.key.c_str());
         return;
+    }
     for (int p = 0; p < kPorts; p++) {
         if (HasLocked(p, Kind::Controller)) continue;
         Slot(p, Kind::Controller) = d.key;
-        LOGI("input: controller %s goes to player %d", d.key.c_str(), p + 1);
+        LOGR("input: controller %s goes to player %d", d.key.c_str(), p + 1);
         return;
     }
+    LOGR("input: controller %s has no player (all four have one)", d.key.c_str());
 }
 
 void Remove(Kind kind, uint64_t id) {
     auto it = std::find_if(g_devices.begin(), g_devices.end(), [&](const Dev& d) { return d.kind == kind && d.id == id; });
     if (it == g_devices.end()) return;
     if (it->pad) SDL_CloseGamepad(it->pad);
-    LOGI("input: %s %s disconnected", KindName(kind), it->key.c_str());
+    if (kind == Kind::Controller) LOGR("input: controller %s disconnected", it->key.c_str());
+    else LOGI("input: %s %s disconnected", KindName(kind), it->key.c_str());
     g_devices.erase(it);
 }
 
@@ -145,7 +180,7 @@ void Init() {
         return;
     }
     int v = SDL_GetVersion();
-    LOGI("input: SDL %d.%d.%d", SDL_VERSIONNUM_MAJOR(v), SDL_VERSIONNUM_MINOR(v), SDL_VERSIONNUM_MICRO(v));
+    LOGR("input: SDL %d.%d.%d", SDL_VERSIONNUM_MAJOR(v), SDL_VERSIONNUM_MINOR(v), SDL_VERSIONNUM_MICRO(v));
     std::lock_guard lock(g_lock);
     g_sdl = true;
     int count = 0;
@@ -153,6 +188,20 @@ void Init() {
         for (int i = 0; i < count; i++) AddPad(ids[i]);
         SDL_free(ids);
     }
+    // a device SDL sees but has no gamepad mapping for is never opened as a pad: name it, so the log says it was there
+    int joys = 0;
+    if (SDL_JoystickID* ids = SDL_GetJoysticks(&joys)) {
+        for (int i = 0; i < joys; i++) {
+            if (SDL_IsGamepad(ids[i])) continue;
+            const char* name = SDL_GetJoystickNameForID(ids[i]);
+            char guid[64];
+            SDL_GUIDToString(SDL_GetJoystickGUIDForID(ids[i]), guid, sizeof(guid));
+            LOGR("input: joystick %s is not a known controller, unused: vid %04x pid %04x, guid %s", name ? name : "?",
+                 SDL_GetJoystickVendorForID(ids[i]), SDL_GetJoystickProductForID(ids[i]), guid);
+        }
+        SDL_free(ids);
+    }
+    LOGR("input: %d controller(s) at start", count);
 }
 
 void HandleEvent(const void* sdl_event) {
