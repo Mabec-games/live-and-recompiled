@@ -302,9 +302,16 @@ function(add_xbe_image target xbe config partitions game_dir)
     target_include_directories(${target} PRIVATE ${XBE_ROOT_DIR}/src/runtime ${GEN})
     # whole: an archive member is otherwise only taken for a symbol nothing defines yet, and every function the host
     # replaces already has the recompiled weak definition, so the replacements would be left out
-    target_link_libraries(${target} PRIVATE "$<LINK_LIBRARY:XBE_WHOLE_ARCHIVE,${target}_host>")
-    # lld keeps the recompiled weak functions overridable by the host ones
-    target_link_options(${target} PRIVATE -fuse-ld=lld -g)
+    if(APPLE)
+        # macOS's own linker: CMake's WHOLE_ARCHIVE is -force_load there, and ld64 lets a host function replace the
+        # recompiled weak one as lld does
+        target_link_libraries(${target} PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,${target}_host>")
+        target_link_options(${target} PRIVATE -g)
+    else()
+        target_link_libraries(${target} PRIVATE "$<LINK_LIBRARY:XBE_WHOLE_ARCHIVE,${target}_host>")
+        # lld keeps the recompiled weak functions overridable by the host ones
+        target_link_options(${target} PRIVATE -fuse-ld=lld -g)
+    endif()
     if(WIN32)
         target_link_options(${target} PRIVATE -municode)  # the host's entry is wWinMain
         if(XBE_PDB)

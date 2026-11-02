@@ -1541,6 +1541,11 @@ bool VulkanBackend::CreateInstance() {
     ai.pEngineName = "xbe_recomp";
     ai.apiVersion = VK_API_VERSION_1_3;
     VkInstanceCreateInfo ci{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
+#ifdef __APPLE__
+    // MoltenVK is a portability driver: the loader lists it only for an instance that asks for those
+    exts.insert(exts.begin(), VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+    ci.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+#endif
     ci.pApplicationInfo = &ai;
     ci.enabledExtensionCount = uint32_t(exts.size());
     ci.ppEnabledExtensionNames = exts.data();
@@ -1721,6 +1726,16 @@ bool VulkanBackend::CreateDevice() {
     if (custom_border_) exts.push_back(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME);
     // ImGui looks its functions up by the extension's names
     if (dynamic_rendering_ext_) exts.push_back(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
+#ifdef __APPLE__
+    {
+        // a portability driver's device must be made with VK_KHR_portability_subset when it has it (MoltenVK does)
+        uint32_t en = 0;
+        vkEnumerateDeviceExtensionProperties(phys_, nullptr, &en, nullptr);
+        std::vector<VkExtensionProperties> dev_exts(en);
+        vkEnumerateDeviceExtensionProperties(phys_, nullptr, &en, dev_exts.data());
+        if (HasExtension(dev_exts, "VK_KHR_portability_subset")) exts.push_back("VK_KHR_portability_subset");
+    }
+#endif
     VkDeviceCreateInfo ci{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, &f};
     ci.queueCreateInfoCount = 1;
     ci.pQueueCreateInfos = &qi;
