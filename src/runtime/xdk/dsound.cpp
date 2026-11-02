@@ -548,11 +548,18 @@ void Render(float* out, uint32_t frames) {
     // block so it doesn't click
     static float gain = 1.0f;
     const app::Settings& set = app::Get();
-    const float v = set.volume / 100.0f, want = set.mute_in_background && app::Background() ? 0.0f : v * v;
+    const float v = set.volume / 100.0f, title = audio::g_title_gain ? std::max(audio::g_title_gain(), 0.0f) : 1.0f;
+    const float want = set.mute_in_background && app::Background() ? 0.0f : v * v * title;
+    // over unity (a title's gain), peaks are rounded off past 0.8 rather than cut at 1
+    const bool soft = want > 1.0f || gain > 1.0f;
+    auto limit = [soft](float x) {
+        if (!soft || std::fabs(x) <= 0.8f) return std::clamp(x, -1.0f, 1.0f);
+        return std::copysign(0.8f + 0.2f * std::tanh((std::fabs(x) - 0.8f) / 0.2f), x);
+    };
     for (uint32_t i = 0; i < frames; i++) {
         float g = gain + (want - gain) * float(i + 1) / float(frames);
-        out[i * 2] = std::clamp(out[i * 2] * g, -1.0f, 1.0f);
-        out[i * 2 + 1] = std::clamp(out[i * 2 + 1] * g, -1.0f, 1.0f);
+        out[i * 2] = limit(out[i * 2] * g);
+        out[i * 2 + 1] = limit(out[i * 2 + 1] * g);
     }
     gain = want;
     static uint64_t rendered = 0;

@@ -5,6 +5,9 @@ project(game LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# no C++ modules here: without this, C++20 sources (SDL 3.4.18's GameInput files on Windows) go through clang-scan-deps,
+# which can't run the Zig compiler wrapper
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 # the recompiler, the runtime and add_xbe_image()
 include(cmake/XbeRecomp.cmake)
@@ -25,8 +28,8 @@ if(NOT GAME_PARTITIONS)
     set(GAME_PARTITIONS 8)
 endif()
 
-# the Microsoft Store package's default.xbe: the disc's code and data, only the header (signature, certificate) is
-# different
+# the Europe disc's default.xbe, which is also the Microsoft Store package's: the USA disc's code and data, only the
+# header (signature, certificate: region, rating, version) is different
 set(XBE_ALSO_SHA1 68a37f0d03d73dabc86a848df5ec1820dd551254)
 
 # target name = GAME_EXE in tools/build.bat, xbe = GAME_XBE

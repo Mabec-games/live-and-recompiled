@@ -8,7 +8,9 @@
 #include <bit>
 #include <cstdlib>
 #include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 
 #include "xdk/hle.h"
@@ -112,9 +114,26 @@ X86_FUNC(sub_001F6C50) {
 // cutscenes::g_skippable (or XBE_SKIPPABLE_CUTSCENES): any cutscene, seen or not, still not in the last half second. Mode 0x21 skips on a
 // button of its own and keeps its test.
 bool cutscenes::g_skippable = false;
+uint32_t cutscenes::g_volume_db = 0;
+
+namespace {
+std::atomic<int64_t> g_cutscene_seen{0};  // steady clock ns of the last 0x4FF00, 0 never
+int64_t SteadyNs() {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+}  // namespace
+
+float cutscenes::AudioGain() {
+    const uint32_t db = std::min<uint32_t>(g_volume_db, 12);
+    const int64_t seen = g_cutscene_seen.load(std::memory_order_relaxed);
+    if (!db || !seen || SteadyNs() - seen > 300'000'000) return 1.0f;
+    return std::pow(10.0f, float(db) / 20.0f);
+}
 
 X86_EXTERN_FUNC(__imp__sub_0004FF00);
 X86_FUNC(sub_0004FF00) {
+    g_cutscene_seen.store(SteadyNs(), std::memory_order_relaxed);  // a cutscene plays (cutscenes::AudioGain)
     static const bool env = std::getenv("XBE_SKIPPABLE_CUTSCENES") != nullptr;
     using kernel::R32;
     uint32_t mode = R32(0x7FA1F8);

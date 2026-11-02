@@ -10,9 +10,10 @@
 namespace ui {
 
 // Launcher build: every setting is made in the external launcher (settings.toml, written before launch), so the
-// settings menu never shows: F1 and Start + Back do nothing, the Options items that opened it do nothing (the Online Play
-// menu's extra one is not added), and in a level Esc is only the game's Start. In the frontend's menu Start, Esc, Back
-// and Backspace ask to quit (Yes / No); the window's close button quits at once
+// settings menu never shows: F1 and Start + Back do nothing, and the Options items that opened it (the pub's Options
+// picture, the pause screen's Y, a match's pause menu) show a notice that the settings are in the launcher (the Online
+// Play menu's extra one is not added). In a level Esc is only the game's Start. In the frontend's menu Esc, Back and
+// Backspace ask to quit (Yes / No) and a pad's Start is the game's; the window's close button quits at once
 inline constexpr bool kLauncherSettings = true;
 
 // the GameInfo::ui hook: drawn inside the ImGui frame on the render thread, with app::UiLock held

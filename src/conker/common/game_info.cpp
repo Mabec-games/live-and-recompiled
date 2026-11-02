@@ -1,4 +1,5 @@
 #include "app/app.h"
+#include "audio/audio.h"
 #include "common/characters.h"
 #include "common/cutscenes.h"
 #include "common/display.h"
@@ -24,6 +25,7 @@ void Init() {
     grass::Init();
     lighting::Init();
     reflection::Init();
+    audio::g_title_gain = cutscenes::AudioGain;  // cutscene_volume
 }
 
 }  // namespace
@@ -43,6 +45,7 @@ const app::GameInfo app::kGame = {
                 {"frame_rate", nullptr, &display::g_frame_rate},  // 30, 60, 120, 180 or 240 (src/conker/game/display.cpp)
                 {"console_timing", &display::g_console_timing, nullptr},  // the game at 30, the rest interpolated (display.cpp)
                 {"skippable_cutscenes", &cutscenes::g_skippable, nullptr},  // LT skips any cutscene (hooks.cpp)
+                {"cutscene_volume", nullptr, &cutscenes::g_volume_db},  // in-engine cutscenes louder, 0 to 12 dB (hooks.cpp)
                 {"rope_physics", &rope::g_physics, nullptr},  // ropes swing as a weighted chain (rope.cpp)
                 {"grass_wind", &grass::g_wind, nullptr},  // distant grass sways too (hooks.cpp)
                 {"grass_max_lod", &grass::g_max_lod, nullptr},  // distant grass keeps all its blades (hooks.cpp)
