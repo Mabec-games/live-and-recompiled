@@ -780,6 +780,7 @@ VkExtent2D WindowExtent() {
 }
 
 VkPrimitiveTopology PrimitiveTopology(const Assembled& a) {
+    if (a.point_quads) return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     if (a.topology == Topology::Points) return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
     if (a.topology == Topology::Lines) return a.strip ? VK_PRIMITIVE_TOPOLOGY_LINE_STRIP : VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
     if (a.topology == Topology::Patches) return VK_PRIMITIVE_TOPOLOGY_PATCH_LIST;
@@ -789,7 +790,7 @@ VkPrimitiveTopology PrimitiveTopology(const Assembled& a) {
 // the pipeline's topology class; the draw sets the topology itself
 VkPrimitiveTopology TopologyClass(uint32_t topo) {
     switch (topo) {
-        case 0: return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+        case 0: return g_point_quads ? VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST : VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
         case 1: return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
         case uint32_t(Topology::Patches): return VK_PRIMITIVE_TOPOLOGY_PATCH_LIST;
         default: return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
@@ -1595,6 +1596,13 @@ bool HasExtension(const std::vector<VkExtensionProperties>& list, const char* na
 
 // a Vulkan 1.3 GPU that presents to the window and has what the renderer needs, a discrete one first
 bool VulkanBackend::PickDevice() {
+    // points without the geometry shader (vertex.h g_point_quads): Metal has none, so a macOS build never asks for it
+#ifdef __APPLE__
+    g_point_quads = true;
+#else
+    if (const char* e = std::getenv("XBE_NO_GEOMETRY_SHADER"); e && *e == '1') g_point_quads = true;
+#endif
+    if (g_point_quads) LOGR("vulkan: points drawn as quads, no geometry shader");
     uint32_t n = 0;
     vkEnumeratePhysicalDevices(inst_, &n, nullptr);
     std::vector<VkPhysicalDevice> devs(n);
@@ -1616,7 +1624,7 @@ bool VulkanBackend::PickDevice() {
         if (p.apiVersion < VK_API_VERSION_1_3) lacks = "Vulkan 1.3";
         else if (!HasExtension(exts, VK_KHR_SWAPCHAIN_EXTENSION_NAME)) lacks = "a swap chain";
         else if (!HasExtension(exts, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME)) lacks = "push descriptors";
-        else if (!f.features.geometryShader) lacks = "geometry shaders";
+        else if (!f.features.geometryShader && !g_point_quads) lacks = "geometry shaders";
         else if (!f.features.textureCompressionBC) lacks = "BC textures";
         else if (!f12.timelineSemaphore || !f12.hostQueryReset) lacks = "timeline semaphores or host query resets";
         else if (!f13.dynamicRendering) lacks = "dynamic rendering";
@@ -1699,7 +1707,7 @@ bool VulkanBackend::CreateDevice() {
     f12.timelineSemaphore = VK_TRUE;
     f12.hostQueryReset = VK_TRUE;
     VkPhysicalDeviceFeatures2 f{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &f12};
-    f.features.geometryShader = VK_TRUE;
+    f.features.geometryShader = g_point_quads ? VK_FALSE : VK_TRUE;
     f.features.textureCompressionBC = VK_TRUE;
     f.features.samplerAnisotropy = aniso_;
     f.features.fillModeNonSolid = non_solid_;
@@ -2953,9 +2961,11 @@ VkPipeline VulkanBackend::FindPipeline(const PsoKey& k, const DrawShaders& sh) {
     }
     if (!pso) {
         uint64_t gh;
-        const Spirv* gs = k.topo == uint32_t(Topology::Points) ? Compile(PointHlsl(), "main", "gs_5_0", gh) : nullptr;
-        // a point list needs the geometry shader that sizes its points: without it there is no point size
-        if (k.topo == uint32_t(Topology::Points) && !gs) {
+        const bool gs_points = k.topo == uint32_t(Topology::Points) && !g_point_quads;
+        const Spirv* gs = gs_points ? Compile(PointHlsl(), "main", "gs_5_0", gh) : nullptr;
+        // a point list needs the geometry shader that sizes its points: without it there is no point size (as quads
+        // the vertex shader sizes them, PointQuadHlsl)
+        if (gs_points && !gs) {
             psos_[h] = VK_NULL_HANDLE;
             return VK_NULL_HANDLE;
         }
@@ -3042,7 +3052,7 @@ size_t VulkanBackend::WarmPipelines(const std::vector<const shader_record::Entry
                                     const std::unordered_map<uint64_t, WarmShader>& made) {
     Spirv gs;
     std::string err;
-    bool have_gs = CompileSpirv(PointHlsl(), "main", "gs_5_0", gs, err);
+    bool have_gs = !g_point_quads && CompileSpirv(PointHlsl(), "main", "gs_5_0", gs, err);
     std::atomic<size_t> n{0};
     ParallelFor(list.size(), warm_.stop, [&](size_t i) {
         const shader_record::Entry& e = *list[i];
@@ -3057,7 +3067,7 @@ size_t VulkanBackend::WarmPipelines(const std::vector<const shader_record::Entry
         k.vs = vs->second.hash;
         k.ps = ps->second.hash;
         bool points = k.topo == uint32_t(Topology::Points);
-        if (points && !have_gs) return;
+        if (points && !have_gs) return;  // as quads too: their vertex shader is a variant made as drawn
         if (k.topo == uint32_t(Topology::Patches)) return;  // made as drawn: the record keeps no shading entry
         VkPipeline pso = CreateDrawPipeline(k, *vs->second.code, *ps->second.code, points ? &gs : nullptr);
         if (!pso) return;
@@ -3435,6 +3445,7 @@ void VulkanBackend::EnsureVertexShader(const State& s, const Assembled& a, DrawS
     }
     shader_record::VertexEntry v = MakeVertexEntry(s, a, sh);
     std::string src = VertexHlsl(v, DrawProgram(s, sh));
+    if (a.point_quads) src = PointQuadHlsl(std::move(src));
     sh.vs_code = Compile(src, "main", "vs_5_0", sh.vh);
     sh.vid = shader_record::Id(shader_record::kVertex, &v, sizeof(v));
     ConstReads reads = ReadsOf(src);
@@ -3701,7 +3712,7 @@ void VulkanBackend::DrawGeometry(const Assembled& a) {
 
 // a list (not a strip, not patches) whose every binding holds the same number of whole vertices, the draw's own
 bool VulkanBackend::Mergeable(const Assembled& a) const {
-    if (!a.buffer_count || !a.regs || a.strip || a.topology == Topology::Patches) return false;
+    if (!a.buffer_count || !a.regs || a.strip || a.topology == Topology::Patches || a.point_quads) return false;
     uint32_t v = 0;
     for (uint32_t i = 0; i < a.buffer_count; i++) {
         const VertexBuffer& b = a.buffers[i];

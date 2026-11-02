@@ -191,6 +191,55 @@ void ResetAssembled(Assembled& out) {
     out.draw_count = 0;
     out.index_count = 0;
     out.base_vertex = 0;
+    out.point_quads = false;
+}
+
+// a point list to quads (Assembled::point_quads): each point's vertex copied to its four corners in every buffer, and
+// a list of two triangles a point over them
+void ExpandPoints(Assembled& out) {
+    static thread_local std::vector<uint32_t> order;  // the points' vertices, in draw order
+    const uint32_t n = out.index_count ? out.index_count : out.draw_count;
+    order.resize(n);
+    for (uint32_t i = 0; i < n; i++) {
+        uint32_t v = i;
+        if (out.index_count) {
+            if (out.index16) {
+                uint16_t x;
+                std::memcpy(&x, static_cast<const uint8_t*>(out.index_src) + size_t(i) * 2, 2);
+                v = x;
+            } else {
+                std::memcpy(&v, static_cast<const uint8_t*>(out.index_src) + size_t(i) * 4, 4);
+            }
+            v = uint32_t(int32_t(v) + out.base_vertex);
+        }
+        order[i] = v;
+    }
+    for (uint32_t b = 0; b < out.buffer_count; b++) {
+        const VertexBuffer src = out.buffers[b];
+        if (!src.stride) continue;  // one element for every vertex
+        std::vector<uint8_t> quads(size_t(n) * 4 * src.stride, 0);
+        for (uint32_t i = 0; i < n; i++) {
+            const size_t at = size_t(order[i]) * src.stride;
+            if (at + src.stride > src.bytes) continue;  // past the buffer: left zero
+            for (uint32_t c = 0; c < 4; c++) std::memcpy(&quads[(size_t(i) * 4 + c) * src.stride], src.src + at, src.stride);
+        }
+        out.gathered[b] = std::move(quads);  // the old copy, if this buffer was one, is read by now
+        out.buffers[b] = {out.gathered[b].data(), uint32_t(out.gathered[b].size()), src.stride};
+    }
+    out.indices.resize(size_t(n) * 6);
+    for (uint32_t i = 0; i < n; i++) {
+        const uint32_t q = i * 4;
+        const uint32_t tri[6] = {q, q + 1, q + 2, q + 2, q + 1, q + 3};  // the geometry shader's strip, as a list
+        std::memcpy(&out.indices[size_t(i) * 6], tri, sizeof(tri));
+    }
+    out.index_src = out.indices.data();
+    out.index16 = false;
+    out.index_count = uint32_t(out.indices.size());
+    out.base_vertex = 0;
+    out.draw_count = 0;
+    out.vertex_count = n * 4;
+    out.strip = false;
+    out.point_quads = true;
 }
 
 // the draw as Assemble got it, plus the vertex range it reads
@@ -542,6 +591,7 @@ bool Assemble(const State& s, uint32_t prim, uint32_t start, uint32_t count, con
     bool raw = kRawVertices && RawReadable(s, inputs);
     bool ok = raw ? AssembleRaw(s, inputs, d, out) : AssembleConverted(s, inputs, d, out);
     if (ok && patches && out.topology == Topology::Triangles && !out.strip) out.topology = Topology::Patches;
+    if (ok && g_point_quads && out.topology == Topology::Points) ExpandPoints(out);
     return ok;
 }
 

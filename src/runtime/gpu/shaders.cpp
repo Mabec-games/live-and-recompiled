@@ -1135,6 +1135,28 @@ void main(point VOut v[1], inout TriangleStream<VOut> strip) {
 )";
 }
 
+std::string PointQuadHlsl(std::string s) {
+    const size_t at = s.find("VOut main(");
+    if (at == std::string::npos || s.find("SV_VertexID") != std::string::npos) return s;
+    const size_t open = at + 9, close = s.find(')', open);
+    const std::string params = s.substr(open + 1, close - open - 1);  // "VIn i" or "VRaw ri"
+    const std::string arg = params.substr(params.rfind(' ') + 1);
+    s.replace(at, 10, "VOut point_main(");
+    return s + "\nVOut main(" + params + ", uint point_vid : SV_VertexID) {\n    VOut o = point_main(" + arg + ");\n" + R"(
+    uint c = point_vid & 3;
+    float size = max(clamp(o.psize, pts.z, pts.w), 1);
+    float2 half_size = size * o.pos.w / surf.xy;
+    float2 back = (0.5 - 1e-3) * 2 * o.pos.w / surf.xy / surf.w;
+    o.pos.x += (c & 1) ? half_size.x : -half_size.x - back.x;
+    o.pos.y += (c & 2) ? -half_size.y : half_size.y + back.y;
+    float4 corner = float4(c & 1, (c >> 1) & 1, 0, 1);
+    if (ptsk.w == 1) o.tc3 = corner;
+    if (ptsk.w == 2) o.tc0 = corner;
+    return o;
+}
+)";
+}
+
 // The edge factors depend on an edge's two ends alone, so triangles sharing one split it alike and leave no cracks; an
 // edge reaching behind the eye takes the most. fractional_odd partitioning grows the pieces smoothly as an edge nears.
 // A triangle wholly off one side of the screen, a quarter of it past the edge, is dropped, and one with two corners

@@ -133,6 +133,7 @@ namespace {
 constexpr uint64_t kDeclarationSalt = 0x10000;    // fixed function seed, above the 16 bit register mask
 constexpr uint64_t kPretransformedSalt = 0x5A5A;  // screen space fixed function vertices, apart from untransformed
 constexpr uint64_t kQuadSalt = 0xC3C30000;        // the QuadHlsl variant, apart from the plain shader
+constexpr uint64_t kPointQuadSalt = 0x3C3C00000000ull;  // the PointQuadHlsl variant (Assembled::point_quads)
 
 }  // namespace
 
@@ -141,6 +142,7 @@ uint64_t VertexKey(const State& s, const Assembled& a, const ShaderChoice& sh) {
     uint64_t vkey = Hash(&a.decode, 8, seed);
     if (!sh.prog && a.pretransformed) vkey ^= kPretransformedSalt;
     if (sh.quad) vkey ^= kQuadSalt;
+    if (a.point_quads) vkey ^= kPointQuadSalt;
     if (!sh.prog) vkey = Hash(&sh.fk, sizeof(sh.fk), vkey);
     if (sh.shading) vkey = Hash(&sh.shading, sizeof(sh.shading), vkey);
     return vkey;

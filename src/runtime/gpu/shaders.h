@@ -183,6 +183,10 @@ std::string PixelHlsl(const PixelKey& k);
 std::string QuadHlsl(std::string s);
 // the geometry shader that draws a point as a square of its size, a point sprite with stage 3 spanning it
 std::string PointHlsl();
+// a vertex shader for a point list drawn as quads (Assembled::point_quads), without the geometry shader: main runs the
+// shader, then moves its output to the corner gl_VertexIndex & 3 of the point's square as PointHlsl would. Unchanged
+// when it reads no inputs (it takes SV_VertexID already)
+std::string PointQuadHlsl(std::string vs);
 // a g_program_shading entry's tessellation: the hull shader (entry hs) and domain shader (ds)
 std::string TessHlsl(uint32_t shading);
 

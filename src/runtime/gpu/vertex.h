@@ -52,7 +52,15 @@ struct Assembled {
     uint32_t draw_count = 0;
     int32_t base_vertex = 0;
     std::array<std::vector<uint8_t>, 16> gathered;  // raw vertices copied in draw order when the indices are sparse
+    // a point list drawn without a geometry shader (g_point_quads): each point's vertex four times over, the corners
+    // of its square (gl_VertexIndex & 3), as two triangles each; topology stays Points for the point state
+    bool point_quads = false;
 };
+
+// Points as quads the vertex shader spreads (PointQuadHlsl), not the geometry shader's (PointHlsl): for a GPU without
+// geometry shaders, Metal through MoltenVK. Set by the backend before the title draws: on in a macOS build, and with
+// XBE_NO_GEOMETRY_SHADER=1 elsewhere (to test that path); off, every point list is drawn as before.
+inline bool g_point_quads = false;
 
 // the FVF bits translated to the register layout the XDK's declarations use
 void FvfInputs(uint32_t fvf, VertexShader& out);
