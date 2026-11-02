@@ -56,7 +56,9 @@
 #include <backends/imgui_impl_win32.h>
 #endif
 
+#ifdef __SSE4_1__
 #include <smmintrin.h>
+#endif
 
 #include "app/app.h"
 #include "core/diag.h"
@@ -83,12 +85,14 @@ bool SameBytes(const T& a, const T& b) {
     static_assert(std::is_trivially_copyable_v<T>);
     const uint8_t* x = reinterpret_cast<const uint8_t*>(&a);
     const uint8_t* y = reinterpret_cast<const uint8_t*>(&b);
-    __m128i diff = _mm_setzero_si128();
     size_t i = 0;
+#ifdef __SSE4_1__
+    __m128i diff = _mm_setzero_si128();
     for (; i + 16 <= sizeof(T); i += 16)
         diff = _mm_or_si128(diff, _mm_xor_si128(_mm_loadu_si128(reinterpret_cast<const __m128i*>(x + i)),
                                                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(y + i))));
     if (!_mm_testz_si128(diff, diff)) return false;
+#endif  // without SSE4.1 (ARM): 4 bytes at a time below
     for (; i + 4 <= sizeof(T); i += 4) {
         uint32_t u, v;
         std::memcpy(&u, x + i, 4);

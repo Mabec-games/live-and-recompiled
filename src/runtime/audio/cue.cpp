@@ -15,7 +15,12 @@ namespace {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wc23-extensions"
 const unsigned char kWav[] = {
+#ifdef __has_embed
 #embed "menu_select.wav"
+#else
+// a compiler without #embed (Apple clang before 17): the same bytes, written by CMake (XbeRecomp.cmake)
+#include "menu_select_wav.inc"
+#endif
 };
 #pragma clang diagnostic pop
 

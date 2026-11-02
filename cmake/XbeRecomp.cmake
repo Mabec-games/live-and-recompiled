@@ -132,6 +132,11 @@ set(XBE_IMGUI_SOURCES
     ${imgui_SOURCE_DIR}/imgui_tables.cpp
     ${imgui_SOURCE_DIR}/imgui_widgets.cpp
     ${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp)
+# the settings menu's sound as bytes, for a compiler without #embed (src/runtime/audio/cue.cpp)
+file(READ ${XBE_ROOT_DIR}/src/runtime/audio/menu_select.wav XBE_MENU_WAV_HEX HEX)
+string(REGEX REPLACE "(..)" "0x\\1," XBE_MENU_WAV_HEX "${XBE_MENU_WAV_HEX}")
+file(CONFIGURE OUTPUT ${CMAKE_BINARY_DIR}/embed/menu_select_wav.inc @ONLY CONTENT "${XBE_MENU_WAV_HEX}\n")
+set_source_files_properties(${XBE_ROOT_DIR}/src/runtime/audio/cue.cpp PROPERTIES INCLUDE_DIRECTORIES ${CMAKE_BINARY_DIR}/embed)
 # the overlay's font, Roboto Regular, as bytes in the executable (src/runtime/app/ui_font.cpp)
 set(XBE_UI_FONT ${CMAKE_BINARY_DIR}/xbe_ui_font.cpp)
 file(READ ${roboto_SOURCE_DIR}/Roboto-Regular.ttf XBE_UI_FONT_HEX HEX)

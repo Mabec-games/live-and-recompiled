@@ -14,7 +14,9 @@
 #ifdef _WIN32
 #include <intrin.h>
 #else
+#if defined(__x86_64__) || defined(_M_X64)
 #include <x86intrin.h>
+#endif
 #endif
 
 namespace {

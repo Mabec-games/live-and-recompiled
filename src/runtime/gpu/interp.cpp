@@ -14,7 +14,9 @@
 #include <utility>
 #include <vector>
 
+#ifdef __SSE2__
 #include <emmintrin.h>
+#endif
 
 #include "core/log.h"
 #include "gpu/backend.h"
@@ -270,6 +272,14 @@ float Rel(float u, float v) {
 // Rel of four values at once, each as Rel has it, times w; added into d in turn, as four calls would. Distance was
 // most of the matching's time
 void AddRel4(const float* u, const float* v, float w, float& d) {
+#ifndef __SSE2__
+    // without SSE (ARM): each lane as the vector code has it, a NaN or infinity counting 0
+    for (int k = 0; k < 4; k++) {
+        const float au = std::fabs(u[k]), av = std::fabs(v[k]);
+        const bool counted = u[k] != v[k] && au <= FLT_MAX && av <= FLT_MAX;
+        d += counted ? std::fabs(u[k] - v[k]) / (1.0f + au + av) * w : 0.0f;
+    }
+#else
     const __m128 sign = _mm_set1_ps(-0.0f), one = _mm_set1_ps(1.0f), big = _mm_set1_ps(FLT_MAX);
     __m128 a = _mm_loadu_ps(u), b = _mm_loadu_ps(v);
     __m128 au = _mm_andnot_ps(sign, a), av = _mm_andnot_ps(sign, b);
@@ -281,6 +291,7 @@ void AddRel4(const float* u, const float* v, float w, float& d) {
     d += r[1];
     d += r[2];
     d += r[3];
+#endif
 }
 // The palette registers another draw left (Stale) count a quarter: whole, another character's bones in them took a
 // character for its look-alike; left out, an eye (its own upload a register, its face's bones left before it) was

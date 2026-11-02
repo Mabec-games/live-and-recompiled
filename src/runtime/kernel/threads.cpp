@@ -90,6 +90,8 @@ void NameHostThread(const char* name) {
     using Fn = HRESULT(WINAPI*)(HANDLE, PCWSTR);
     static Fn set = reinterpret_cast<Fn>(reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "SetThreadDescription")));
     if (set) set(GetCurrentThread(), w);
+#elif defined(__APPLE__)
+    pthread_setname_np(name);  // macOS names the calling thread only
 #else
     pthread_setname_np(pthread_self(), name);
 #endif

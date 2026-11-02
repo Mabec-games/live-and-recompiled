@@ -12,13 +12,24 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #else
+#include <fcntl.h>
 #include <sys/mman.h>
 #include <unistd.h>
+
+#include <cstdio>
 #endif
 
 namespace mem {
 
 static uint8_t* g_base = nullptr;
+
+#ifndef _WIN32
+// the host's pages are bigger than the guest's 4 KB (16 KB on Apple Silicon)
+static bool BigPages() {
+    static const bool big = sysconf(_SC_PAGESIZE) > long(kPage);
+    return big;
+}
+#endif
 static std::recursive_mutex g_lock;
 
 uint8_t* Base() { return g_base; }
@@ -61,9 +72,23 @@ bool Init() {
     // the XACT audio engine polls MCPX APU registers the same way
     if (g_base) VirtualAlloc(g_base + kApuRegisterBase, kApuRegisterSize, MEM_COMMIT, PAGE_READWRITE);
 #else
-    void* p = mmap(reinterpret_cast<void*>(0x100000000ull), size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+    // host pages over 4 KB (Apple Silicon's 16 KB) can't be committed one guest page at a time: the address space is
+    // readable and writable from the start (backed only as touched), Commit and Decommit keep the map (BigPages)
+    void* p = mmap(reinterpret_cast<void*>(0x100000000ull), size, BigPages() ? PROT_READ | PROT_WRITE : PROT_NONE,
+                   MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
     g_base = p == MAP_FAILED ? nullptr : static_cast<uint8_t*>(p);
+#ifdef __APPLE__
+    // no memfd on macOS: a shared memory object, its name gone at once
+    int fd = -1;
+    if (g_base) {
+        char name[32];
+        std::snprintf(name, sizeof(name), "/xbe-ram-%d", int(getpid()));
+        fd = shm_open(name, O_RDWR | O_CREAT | O_EXCL, 0600);
+        shm_unlink(name);
+    }
+#else
     int fd = g_base ? memfd_create("ram", 0) : -1;
+#endif
     if (fd < 0 || ftruncate(fd, kPhysicalSize) ||
         mmap(g_base + kContiguousBase, kPhysicalSize, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fd, 0) == MAP_FAILED ||
         mmap(g_base + kWriteCombineBase, kPhysicalSize, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fd, 0) == MAP_FAILED)
@@ -98,7 +123,7 @@ bool Commit(uint32_t va, uint32_t size) {
         return false;
     }
 #else
-    if (mprotect(g_base + first, size_t(end - first), PROT_READ | PROT_WRITE)) {
+    if (!BigPages() && mprotect(g_base + first, size_t(end - first), PROT_READ | PROT_WRITE)) {
         LOGE("memory: commit %08X+%X failed", first, uint32_t(end - first));
         return false;
     }
@@ -115,8 +140,13 @@ void Decommit(uint32_t va, uint32_t size) {
 #ifdef _WIN32
     VirtualFree(g_base + first, size_t(end - first), MEM_DECOMMIT);
 #else
-    madvise(g_base + first, size_t(end - first), MADV_DONTNEED);
-    mprotect(g_base + first, size_t(end - first), PROT_NONE);
+    if (BigPages()) {
+        // a host page may hold guest pages still committed: zeroed, as a commit would find them, and left mapped
+        std::memset(g_base + first, 0, size_t(end - first));
+    } else {
+        madvise(g_base + first, size_t(end - first), MADV_DONTNEED);
+        mprotect(g_base + first, size_t(end - first), PROT_NONE);
+    }
 #endif
     for (uint64_t p = first; p < end; p += kPage) g_committed[size_t(p >> 12)] = 0;
 }

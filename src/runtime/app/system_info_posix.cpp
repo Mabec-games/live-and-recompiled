@@ -1,6 +1,11 @@
 // The log's opening lines everywhere but Windows (app/system_info.cpp): what the game runs on and with which settings.
 // The GPU is the renderer's to name, once it picked one.
+#if defined(__x86_64__)
 #include <cpuid.h>
+#endif
+#ifdef __APPLE__
+#include <sys/sysctl.h>
+#endif
 #include <sys/utsname.h>
 #include <unistd.h>
 
@@ -33,6 +38,13 @@ std::string OsVersion() {
 }
 
 std::string CpuName() {
+#ifdef __APPLE__
+    char brand[128] = {};
+    size_t n = sizeof(brand) - 1;
+    return sysctlbyname("machdep.cpu.brand_string", brand, &n, nullptr, 0) == 0 ? std::string(brand) : "unknown";
+#elif !defined(__x86_64__)
+    return "unknown";
+#else
     unsigned r[4] = {};
     if (!__get_cpuid(0x80000000, &r[0], &r[1], &r[2], &r[3]) || r[0] < 0x80000004) return "unknown";
     char brand[49] = {};
@@ -44,6 +56,7 @@ std::string CpuName() {
     s.erase(0, s.find_first_not_of(' '));
     s.erase(s.find_last_not_of(' ') + 1);
     return s;
+#endif
 }
 
 }  // namespace

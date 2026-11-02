@@ -2,7 +2,9 @@
 // thread, to the log. `addr2line -fiC -e Game <address>` names a host frame's line.
 #include <execinfo.h>
 #include <signal.h>
-#include <ucontext.h>
+#ifdef __linux__
+#include <ucontext.h>  // the faulting address (OnSignal); macOS asks for _XOPEN_SOURCE and has other names
+#endif
 #include <unistd.h>
 
 #include <atomic>
