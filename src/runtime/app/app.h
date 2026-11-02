@@ -41,6 +41,8 @@ struct Settings {
     std::string gpu;                  // the name of the graphics adapter to draw with, "" the best there is (read at launch)
     std::string renderer = "vulkan";  // which gpu::Backend draws, read at launch (gpu/backend.cpp)
     std::string aspect = "auto";     // "W:H" ("4:3", "16:9", "21:9", ...), or "auto": the output's own shape
+    // the console's language, which the title reads as it boots: english, japanese, german, french, spanish or italian
+    std::string language = "english";
     std::string join_ip;              // host[:port]: a system link host past the LAN (or on this PC) the search also asks
     uint32_t system_link_port = 3074;  // the UDP port system link binds, read as the network starts
     // an online room's key, from the launcher's room code (0 none: system link as before); read as the network starts
@@ -68,6 +70,9 @@ float RenderScale(uint32_t guest_height);
 float Aspect();
 // the display is 3:2 or wider: the console reports a widescreen TV and the frame is shown 16:9, else 4:3 as on a 4:3 TV
 bool Widescreen();
+// the language setting as the console's XC_LANGUAGE: 1 English, 2 Japanese, 3 German, 4 French, 5 Spanish, 6 Italian
+// (English for any other name)
+uint32_t Language();
 // the shape of the frame the title draws, which the window letterboxes: GameInfo::aspect's for a title patched to
 // draw any, else 16:9 on a widescreen TV and 4:3 on a 4:3 one
 float FrameAspect();

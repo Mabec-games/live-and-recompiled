@@ -74,6 +74,7 @@ void Load() {
     s.gpu = t["gpu"].value_or(s.gpu);
     s.renderer = t["renderer"].value_or(s.renderer);
     s.aspect = t["aspect"].value_or(s.aspect);
+    s.language = t["language"].value_or(s.language);
     s.join_ip = t["join_ip"].value_or(s.join_ip);
     s.system_link_port = t["system_link_port"].value_or(s.system_link_port);
     s.system_link_key = uint32_t(t["system_link_key"].value_or(int64_t(s.system_link_key)));
@@ -118,6 +119,7 @@ toml::table Table() {
                   {"gpu", s.gpu},
                   {"renderer", s.renderer},
                   {"aspect", s.aspect},
+                  {"language", s.language},
                   {"join_ip", s.join_ip},
                   {"system_link_port", int64_t(s.system_link_port)},
                   {"system_link_key", int64_t(s.system_link_key)},
@@ -178,6 +180,13 @@ float Aspect() {
 
 // the aspect setting picks the TV the console reports; the title reads it once at boot
 bool Widescreen() { return Aspect() >= 1.5f - 1e-4f; }  // 3:2 or wider
+
+uint32_t Language() {
+    static const char* const kNames[] = {"english", "japanese", "german", "french", "spanish", "italian"};
+    for (uint32_t i = 0; i < 6; i++)
+        if (Get().language == kNames[i]) return i + 1;
+    return 1;
+}
 
 float FrameAspect() {
     if (kGame.aspect) return std::clamp(kGame.aspect(Aspect()), 0.5f, 4.0f);

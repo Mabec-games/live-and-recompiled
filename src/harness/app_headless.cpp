@@ -21,6 +21,11 @@ Mode Output() { return Desktop(); }
 float RenderScale(uint32_t) { return 1.0f; }
 float Aspect() { return 16.0f / 9.0f; }
 bool Widescreen() { return true; }
+// XC_LANGUAGE from the environment (1 English, 2 Japanese, 3 German, 4 French, 5 Spanish, 6 Italian)
+uint32_t Language() {
+    const char* e = std::getenv("XC_LANGUAGE");
+    return e ? uint32_t(std::atoi(e)) : 1;
+}
 float FrameAspect() { return kGame.aspect ? kGame.aspect(Aspect()) : 16.0f / 9.0f; }
 
 std::filesystem::path ExeDir() {

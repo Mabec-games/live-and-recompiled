@@ -49,7 +49,7 @@ uint32_t GuestText(const char* s) {
 // its handler and a condition, up to an item of slot 0. 0x75E760 is Xbox Live (slot 0xC9), System Link (0xC8),
 // Dumbots (0xC7) and Profiles (0x2FD); 0x75E718 the same with one more item. Xbox Live's item goes from both, and
 // System Link's slot points at "Online Play", as does the slot of its own menu's title (0x118, the menu 0x23A2E3 runs,
-// only reached from this one). The game runs in English: XC_LANGUAGE is 1.
+// only reached from this one). "Online Play" is English whatever the language setting.
 X86_EXTERN_FUNC(__imp__sub_00236030);
 X86_FUNC(sub_00236030) {
     constexpr uint32_t kLists[] = {0x75E760, 0x75E718}, kStrings = 0x849800;
