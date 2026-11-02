@@ -1171,6 +1171,7 @@ private:
     bool non_solid_ = false;
     bool tess_ = false;  // ProgramShading::tess
     bool precise_ = false;
+    bool demote_ = false;  // shaderDemoteToHelperInvocation: HLSL's discard and clip compile to it
     bool custom_border_ = false;
     bool dynamic_rendering_ext_ = false;
     uint32_t custom_border_max_ = 0;
@@ -1648,6 +1649,7 @@ bool VulkanBackend::PickDevice() {
         non_solid_ = f.features.fillModeNonSolid;
         tess_ = f.features.tessellationShader;
         precise_ = f.features.occlusionQueryPrecise;
+        demote_ = f13.shaderDemoteToHelperInvocation;
         custom_border_ = HasExtension(exts, VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME);
         dynamic_rendering_ext_ = HasExtension(exts, VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
     }
@@ -1695,6 +1697,8 @@ bool VulkanBackend::CreateDevice() {
     border.customBorderColorWithoutFormat = VK_TRUE;
     VkPhysicalDeviceVulkan13Features f13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES, custom_border_ ? &border : nullptr};
     f13.dynamicRendering = VK_TRUE;
+    // glslang writes discard as OpDemoteToHelperInvocation, which a shader may only use with the feature on
+    f13.shaderDemoteToHelperInvocation = demote_;
     VkPhysicalDeviceVulkan12Features f12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, &f13};
     f12.timelineSemaphore = VK_TRUE;
     f12.hostQueryReset = VK_TRUE;
@@ -1931,12 +1935,17 @@ void VulkanBackend::CreateBlitSamplers() {
 }
 
 bool VulkanBackend::InitUi() {
-    VkDescriptorPoolSize ps{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16};
+    // ImGui's backend (1.92 on) binds a texture and its sampler as two sets, a sampled image and a sampler: a pool
+    // without those types fails the allocation on a strict driver (MoltenVK), which lost the overlay and with it the
+    // frame's picture; other drivers let it pass
+    const VkDescriptorPoolSize ps[] = {{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16},
+                                       {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 16},
+                                       {VK_DESCRIPTOR_TYPE_SAMPLER, 16}};
     VkDescriptorPoolCreateInfo pi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
     pi.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    pi.maxSets = 16;
-    pi.poolSizeCount = 1;
-    pi.pPoolSizes = &ps;
+    pi.maxSets = 32;
+    pi.poolSizeCount = uint32_t(std::size(ps));
+    pi.pPoolSizes = ps;
     if (vkCreateDescriptorPool(dev_, &pi, nullptr, &ui_pool_) != VK_SUCCESS) return false;
     ImGui_ImplVulkan_InitInfo ii{};
     ii.ApiVersion = VK_API_VERSION_1_3;
