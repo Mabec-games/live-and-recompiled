@@ -5,6 +5,9 @@ project(game LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# no C++ modules here: without this, C++20 sources (SDL 3.4.18's GameInput files on Windows) go through clang-scan-deps,
+# which can't run the Zig compiler wrapper
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 # the recompiler, the runtime and add_xbe_image()
 include(cmake/XbeRecomp.cmake)
