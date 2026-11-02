@@ -556,6 +556,8 @@ private:
         if (auto set = reinterpret_cast<SetDescription>(
                 reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "SetThreadDescription"))))
             set(GetCurrentThread(), L"render");
+#elif defined(__APPLE__)
+        pthread_setname_np("render");  // macOS names the calling thread only
 #else
         pthread_setname_np(pthread_self(), "render");
 #endif
