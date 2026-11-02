@@ -1354,6 +1354,8 @@ private:
         uint64_t fence;
     };
     VkQueryPool query_pool_ = VK_NULL_HANDLE;
+    std::vector<uint64_t> query_use_;  // per query, the fence value of the submission that last used it (0 none)
+    uint64_t query_done_ = 0;          // Completed() as last asked for them: asked again only for a query past it
     bool queries_failed_ = false;
     uint32_t query_next_ = 0;
     std::vector<Query> counted_;  // since the last ClearReport
@@ -3957,6 +3959,7 @@ bool VulkanBackend::EnsureQueries() {
         return false;
     }
     vkResetQueryPool(dev_, query_pool_, 0, kQueries);
+    query_use_.assign(kQueries, 0);
     return true;
 }
 
@@ -3964,9 +3967,24 @@ bool VulkanBackend::EnsureQueries() {
 // begun inside the draw's render pass and ended there
 uint32_t VulkanBackend::BeginCountedDraw(const State& s) {
     if (replay_ || !s.simple[kMCountEnable >> 2] || !EnsureQueries()) return kNoQuery;
-    uint32_t query = query_next_++ % kQueries;
+    // the next query the GPU is done with: a host reset of one a submission still uses (the ring come round within
+    // the frames in flight, many counted draws a frame) is invalid, and MoltenVK's validation caught it
+    const uint64_t recording = fence_value_ + 1;
+    uint32_t query = kNoQuery;
+    for (uint32_t tries = 0; tries < kQueries; tries++) {
+        const uint32_t q = query_next_++ % kQueries;
+        if (query_use_[q] > query_done_ && query_use_[q] < recording) query_done_ = Completed();
+        if (query_use_[q] <= query_done_) {
+            query = q;
+            break;
+        }
+    }
+    if (query == kNoQuery) {
+        LOG_FIRST(1, "vulkan: every occlusion query is in flight, a counted draw goes uncounted");
+        return kNoQuery;
+    }
+    query_use_[query] = recording;
     frame_counted_++;
-    // its last use was frames ago, done by now
     vkResetQueryPool(dev_, query_pool_, query, 1);
     vkCmdBeginQuery(cmd_, query_pool_, query, precise_ ? VK_QUERY_CONTROL_PRECISE_BIT : 0);
     return query;
