@@ -97,7 +97,9 @@ if [ ! -f "$SRC/assets/default.xbe" ]; then
         XISO="$XSRC/build/extract-xiso"
     fi
     mkdir -p "$SRC/assets"
-    "$XISO" -q -x "$ISO" -d "$SRC/assets" > "$LOGS/extract.log" 2>&1 || fail "couldn't extract the disc image"
+    # options before the image: macOS's getopt stops at the first operand (Linux's moves them), so a -d after it was
+    # read as a second file
+    "$XISO" -q -x -d "$SRC/assets" "$ISO" > "$LOGS/extract.log" 2>&1 || fail "couldn't extract the disc image"
     [ -f "$SRC/assets/default.xbe" ] || fail "the disc image has no default.xbe: is it Conker: Live & Reloaded (USA)?"
 fi
 
