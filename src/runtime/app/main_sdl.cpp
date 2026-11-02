@@ -373,7 +373,21 @@ void Quit() {
 }
 
 void SetTitle(const std::wstring& title) {
-    if (g_window) SDL_SetWindowTitle(g_window, Utf8(title).c_str());
+    if (!g_window) return;
+#ifdef __APPLE__
+    // AppKit's windows are the main thread's: the title (the FPS, from the render thread) goes there, not waited for
+    if (!SDL_IsMainThread()) {
+        SDL_RunOnMainThread(
+            [](void* p) {
+                auto* t = static_cast<std::string*>(p);
+                if (g_window) SDL_SetWindowTitle(g_window, t->c_str());
+                delete t;
+            },
+            new std::string(Utf8(title)), false);
+        return;
+    }
+#endif
+    SDL_SetWindowTitle(g_window, Utf8(title).c_str());
 }
 
 bool Background() { return g_background.load(std::memory_order_relaxed); }
@@ -438,8 +452,30 @@ std::vector<const char*> VulkanExtensions() {
 }
 
 bool VulkanSurface(void* instance, void* surface) {
-    return g_window && SDL_Vulkan_CreateSurface(g_window, static_cast<VkInstance>(instance), nullptr,
-                                                static_cast<VkSurfaceKHR*>(surface));
+    if (!g_window) return false;
+#ifdef __APPLE__
+    // macOS makes the window's Metal view and layer on the main thread alone; asked from the render thread, the
+    // surface drew into a layer the window never showed (a black window, the frames valid). The main thread runs it
+    // between events and the render thread waits
+    struct Args {
+        void* instance;
+        void* surface;
+        bool ok;
+    } args{instance, surface, false};
+    if (!SDL_IsMainThread()) {
+        SDL_RunOnMainThread(
+            [](void* p) {
+                auto* a = static_cast<Args*>(p);
+                a->ok = SDL_Vulkan_CreateSurface(g_window, static_cast<VkInstance>(a->instance), nullptr,
+                                                 static_cast<VkSurfaceKHR*>(a->surface));
+            },
+            &args, true);
+        if (!args.ok) LOGE("vulkan: no surface on the main thread: %s", SDL_GetError());
+        return args.ok;
+    }
+#endif
+    return SDL_Vulkan_CreateSurface(g_window, static_cast<VkInstance>(instance), nullptr,
+                                    static_cast<VkSurfaceKHR*>(surface));
 }
 
 void PixelSize(uint32_t& w, uint32_t& h) {
