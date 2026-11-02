@@ -67,6 +67,8 @@ std::atomic<bool> g_open{false};
 float g_fade = 1.0f;  // the menu's alpha as it fades in; render thread only
 // the quit prompt alone, over the game (the frontend's Start)
 std::atomic<bool> g_quit{false};
+// the launcher build's notice that the settings are in the launcher, where an Options item would open the menu
+std::atomic<bool> g_info{false};
 // the port of the controller that opened the menu, -1 a keyboard
 std::atomic<int> g_owner{-1};
 // Escape went to shut the menu or the prompt: it is not the game's Start until it is let go
@@ -150,7 +152,7 @@ void Cues(bool opened_before, bool settings_changed) {
 
 // the game is held while the menu or the prompt is up (kernel::Hold), but for a multiplayer match, which runs on for
 // the other players (Draw lets go or holds again as a match starts or ends under the menu)
-void Hold() { kernel::Hold((g_open.load() || g_quit.load()) && !warp::Multiplayer()); }
+void Hold() { kernel::Hold((g_open.load() || g_quit.load() || g_info.load()) && !warp::Multiplayer()); }
 
 // the menu shows or goes
 void SetOpen(bool open) {
@@ -166,6 +168,13 @@ void SetOpen(bool open) {
 // the prompt shows or goes
 void SetQuit(bool quit) {
     g_quit.store(quit);
+    Hold();
+}
+
+// the notice shows or goes
+void SetInfo(bool info) {
+    g_info.store(info);
+    if (!info) g_owner.store(-1);
     Hold();
 }
 
@@ -651,7 +660,7 @@ void PadFrame(bool open, bool quit) {
     if (shown && pressed(&Buttons::start)) {
         toggled = now;
         if (open) Close();
-        else SetQuit(false);
+        else SetQuit(false), SetInfo(false);
         last = drive;
         return;
     }
@@ -716,6 +725,23 @@ bool QuitBody() {
     return !cancel && !g_pad.b;
 }
 
+// the launcher build's notice: where the settings the game's Options pages had are made. A, B, Esc or Enter close it
+bool InfoBody() {
+    ImGui::SetWindowFontScale(1.35f);
+    ImGui::TextUnformatted("Settings are in the launcher");
+    ImGui::TextDisabled("Close the game and open the launcher to change controls, invert aim, vibration,");
+    ImGui::TextDisabled("graphics and audio. They apply the next time you play.");
+    ImGui::Dummy(ImVec2(0.0f, ImGui::GetFontSize() * 0.8f));
+    const ImGuiStyle& st = ImGui::GetStyle();
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(st.FramePadding.x * 3.0f, st.FramePadding.y * 1.5f));
+    const bool ok = ImGui::Button("OK");
+    ImGui::SetItemDefaultFocus();
+    ImGui::PopStyleVar();
+    ImGui::Dummy(ImVec2(0.0f, ImGui::GetFontSize() * 0.4f));
+    ImGui::TextDisabled("A, B, Enter or Esc to close.");
+    return !ok && !g_pad.b;
+}
+
 }  // namespace
 
 void Draw(double fps) {
@@ -723,12 +749,13 @@ void Draw(double fps) {
     static double last_fps = -1.0;
     static bool last_title = !g_fps_title;
     static int last_look = -1;
-    PadFrame(g_open.load(), g_quit.load());
+    PadFrame(g_open.load(), g_quit.load() || g_info.load());
     const bool open = g_open.load();
     const bool quit = g_quit.load();
+    const bool info = g_info.load() && !quit;
     if (!open) g_rebind = -1;  // closing the menu cancels a rebind
     if (open && !was_open) g_controls_mode = keyboard::ActiveMode();
-    if ((open || quit) && kernel::Held() == warp::Multiplayer()) kernel::Hold(!warp::Multiplayer());
+    if ((open || quit || info) && kernel::Held() == warp::Multiplayer()) kernel::Hold(!warp::Multiplayer());
 
     // the menu saves itself: once its settings have held still for kSaveDelay (not every frame of a slider's drag),
     // and as it shuts
@@ -798,6 +825,26 @@ void Draw(double fps) {
         was_quit = up;
         if (!up) {
             SetQuit(false);
+            app::Post(mouse::kRefresh);
+        }
+    }
+    // the notice alone, as the prompt: OK, A, B, Start or Esc shut it
+    if (info && !open) {
+        if (!ImGui::IsPopupOpen("Settings")) ImGui::OpenPopup("Settings");
+        const ImVec2 display = ImGui::GetIO().DisplaySize;
+        ImGui::SetNextWindowPos(ImVec2(display.x * 0.5f, display.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+        bool up = false;
+        if (ImGui::BeginPopupModal("Settings", nullptr,
+                                   ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar)) {
+            up = InfoBody();
+            if (!up) ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+        static bool was_info = false;
+        Cues(was_info, false);
+        was_info = up;
+        if (!up) {
+            SetInfo(false);
             app::Post(mouse::kRefresh);
         }
     }
@@ -1191,9 +1238,10 @@ bool Message(void* hwnd, uint32_t msg, uintptr_t wp, intptr_t lp, intptr_t* resu
                     g_quit.store(false);
                     g_owner.store(-1);
                     SetOpen(!g_open.load());
-                } else if (g_open.load() || g_quit.load()) {
+                } else if (g_open.load() || g_quit.load() || g_info.load()) {
                     g_esc_swallow.store(true);
                     g_quit.store(false);
+                    SetInfo(false);
                     SetOpen(false);
                 } else {
                     break;
@@ -1227,10 +1275,16 @@ bool Message(void* hwnd, uint32_t msg, uintptr_t wp, intptr_t lp, intptr_t* resu
     return false;
 }
 
-bool Open() { return g_open.load() || g_quit.load(); }
+bool Open() { return g_open.load() || g_quit.load() || g_info.load(); }
 
 void Show(Tab tab, int port) {
-    if (kLauncherSettings) return;
+    if (kLauncherSettings) {  // no menu to open: say where the settings are instead
+        if (g_quit.load() || g_info.load()) return;
+        g_owner.store(port);
+        SetInfo(true);
+        app::Post(mouse::kRefresh);
+        return;
+    }
     if (tab == Tab::Controls) g_tab_target.store(kControlsTab);
     else if (tab == Tab::Multiplayer) g_tab_target.store(kMultiplayerTab);
     g_quit.store(false);

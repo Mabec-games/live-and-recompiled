@@ -80,9 +80,11 @@ void gamepad::Pad(int port, input::Pad& pad) {
     const bool start = pad.buttons & kStart;
     const bool start_pressed = start && !start_was[port];
     start_was[port] = start;
-    if (frontend && start) {
+    // the launcher build has no settings menu: a pad's Start is the game's there, as on the console, and Esc (the
+    // keyboard's Start) asks to quit, as Back does
+    const bool esc = ui::kLauncherSettings && ui::EscStart();
+    if (frontend && start && (!ui::kLauncherSettings || esc)) {
         pad.buttons &= uint16_t(~kStart);
-        // the launcher build has no settings menu: Start (Esc on a keyboard) asks to quit, as Back does
         if (start_pressed) {
             if (ui::kLauncherSettings) ui::ShowQuit();
             else ui::Show(ui::Tab::Last, port);
