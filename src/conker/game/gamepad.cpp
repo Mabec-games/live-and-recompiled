@@ -64,7 +64,20 @@ X86_FUNC(sub_0004D1F0) {
     }
     const bool multiplayer = MultiplayerPath(player);
     __imp__sub_0004D1F0(ctx, base);
-    if (player < uint32_t(input::kPorts)) base[invert] = (gamepad::g_invert_aim[player] != multiplayer) ? 1 : 0;
+    if (player < uint32_t(input::kPorts)) {
+        const uint8_t value = (gamepad::g_invert_aim[player] != multiplayer) ? 1 : 0;
+        base[invert] = value;
+        // each player's when it changes: which path, what the setting is, what the scheme gets (1 normal in
+        // multiplayer, inverted in single player)
+        static int last[input::kPorts] = {-1, -1, -1, -1};
+        const int now = (multiplayer ? 4 : 0) | (gamepad::g_invert_aim[player] ? 2 : 0) | value;
+        if (last[player] != now) {
+            last[player] = now;
+            LOGR("input: player %u invert aim %s, %s, the scheme gets %u (up looks %s)", player + 1,
+                 gamepad::g_invert_aim[player] ? "on" : "off", multiplayer ? "multiplayer" : "single player", value,
+                 gamepad::g_invert_aim[player] ? "down" : "up");
+        }
+    }
 }
 
 // 0x203B50: the pause menu's input, once a frame while paused (0x204060). Its page is [0x849AF8]: 0 the pause screen,
