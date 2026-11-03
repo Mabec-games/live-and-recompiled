@@ -127,13 +127,21 @@ int64_t SteadyNs() {
 float cutscenes::AudioGain() {
     const uint32_t db = std::min<uint32_t>(g_volume_db, 12);
     const int64_t seen = g_cutscene_seen.load(std::memory_order_relaxed);
-    if (!db || !seen || SteadyNs() - seen > 300'000'000) return 1.0f;
+    const bool playing = seen && SteadyNs() - seen <= 300'000'000;
+    // a cutscene's end in the log, so the audio trace (XBE_TRACE_DSOUND) lines up with the scenes
+    static bool was_playing = false;
+    if (was_playing && !playing) LOGR("cutscene: ends");
+    was_playing = playing;
+    if (!db || !playing) return 1.0f;
     return std::pow(10.0f, float(db) / 20.0f);
 }
 
 X86_EXTERN_FUNC(__imp__sub_0004FF00);
 X86_FUNC(sub_0004FF00) {
-    g_cutscene_seen.store(SteadyNs(), std::memory_order_relaxed);  // a cutscene plays (cutscenes::AudioGain)
+    const int64_t now_ns = SteadyNs(), last = g_cutscene_seen.exchange(now_ns, std::memory_order_relaxed);
+    // a cutscene plays (cutscenes::AudioGain); the first frame after a gap is a new one
+    if (!last || now_ns - last > 300'000'000)
+        LOGR("cutscene: starts, level %u, slot %u", kernel::R32(0x7FA1F8), ctx.edi);
     static const bool env = std::getenv("XBE_SKIPPABLE_CUTSCENES") != nullptr;
     using kernel::R32;
     uint32_t mode = R32(0x7FA1F8);

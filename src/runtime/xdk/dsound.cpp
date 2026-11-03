@@ -4,6 +4,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <condition_variable>
 #include <deque>
 #include <map>
@@ -296,6 +297,24 @@ int Depth(const Voice& v) {
 
 bool Speaker(uint32_t b) { return b < 10 && b != 3; }  // fronts, centre, backs and the crosstalk inputs; 3 is the sub
 
+// The crosstalk inputs 6-9 are where a 3D voice's HRTF output goes: on the console the VP filters the voice for each
+// ear and direction (DirectSoundUseFullHRTF), so the four bins share one sound between them. Here the voice reaches
+// all four unfiltered and in step, and the crosstalk effect passes the front and back pairs on to the speakers, so
+// a 3D sound played four copies of itself. Each send there is a quarter (-12 dB), one sound's worth: measured against
+// the Xbox One playing the intro's bar exit, the mix came 6.5 dB rms off the console and is 4.0 dB with this (the
+// lamp and the other 3D sounds were 5-8 dB loud, speech and ambience 7 dB quiet beside them; issues #11, #12).
+// XBE_XTALK_DB=<dB> tries another share (0 for the old one).
+float XtalkShare() {
+    static const float share = [] {
+        const char* e = std::getenv("XBE_XTALK_DB");
+        const float db = e ? float(std::atof(e)) : -12.0f;
+        if (e) LOGR("dsound: 3D (crosstalk) sends at %.1f dB (XBE_XTALK_DB)", db);
+        return std::pow(10.0f, db / 20.0f);
+    }();
+    return share;
+}
+bool CrosstalkInput(uint32_t b) { return b >= 6 && b <= 9; }
+
 constexpr uint32_t kChannels = 8;  // the most a voice mixes; a hardware voice holds two
 
 struct Route {
@@ -346,6 +365,7 @@ int Routes(const Voice& v, Route* r) {
         while (k < count && r[k].bin != b) k++;
         if (k == count) r[count++] = {uint8_t(b), {}};
         x /= float(1 << g_bin_headroom[b]);
+        if (CrosstalkInput(b)) x *= XtalkShare();
         r[k].g[c] = heard ? r[k].g[c] + x : std::max(r[k].g[c], x);
     };
     for (uint32_t c = 0; c < channels; c++) {
@@ -520,6 +540,22 @@ void Render(float* out, uint32_t frames) {
         double w = std::min(1.0, frames / (0.5 * audio::kRate));
         v->recent += (block / frames - v->recent) * w;
     }
+    // XBE_AUDIO_STEMS=<file>: every 10 ms, the energy of each part of what is heard, as it is downmixed below: the
+    // voices' own front, centre and back bins, what the effects add to each, and the result (12 floats a record), to
+    // fit against a recording of the console which part is off
+    static FILE* stems = [] {
+        const char* p = std::getenv("XBE_AUDIO_STEMS");
+        FILE* f = p ? std::fopen(p, "wb") : nullptr;
+        if (p) LOGR("dsound: mix stems go to %s%s", p, f ? "" : " (can't open it)");
+        return f;
+    }();
+    static const uint32_t kStemBins[5] = {0, 1, 2, 4, 5};
+    static std::vector<float> direct;
+    if (stems) {
+        direct.resize(5 * size_t(frames));
+        for (int k = 0; k < 5; k++)
+            std::memcpy(&direct[size_t(k) * frames], &bus[size_t(kStemBins[k]) * frames], frames * 4);
+    }
     // the GP's effects, a frame at a time
     if (dsfx::Loaded()) {
         static float frame[kBins * dsfx::kFrame];
@@ -544,6 +580,32 @@ void Render(float* out, uint32_t frames) {
             if (b == 2 || (b & 1)) out[i * 2 + 1] += src[i] * g;
         }
     }
+    if (stems) {
+        // 0 front L, 1 front R, 2 centre (each side), 3 back L, 4 back R: the voices' (0-4) and the effects' (5-9)
+        static double acc[12] = {};
+        static uint32_t in_block = 0;
+        const float g[5] = {float(1 << g_bin_headroom[0]), float(1 << g_bin_headroom[1]),
+                            float(1 << g_bin_headroom[2]) * 0.707f, float(1 << g_bin_headroom[4]),
+                            float(1 << g_bin_headroom[5])};
+        for (uint32_t i = 0; i < frames; i++) {
+            for (int k = 0; k < 5; k++) {
+                const float d = direct[size_t(k) * frames + i] * g[k];
+                const float fx = bus[size_t(kStemBins[k]) * frames + i] * g[k] - d;
+                acc[k] += double(d) * d;
+                acc[5 + k] += double(fx) * fx;
+            }
+            acc[10] += double(out[i * 2]) * out[i * 2];
+            acc[11] += double(out[i * 2 + 1]) * out[i * 2 + 1];
+            if (++in_block == audio::kRate / 100) {
+                float rec[12];
+                for (int k = 0; k < 12; k++) rec[k] = float(acc[k]), acc[k] = 0;
+                std::fwrite(rec, sizeof rec, 1, stems);
+                in_block = 0;
+            }
+        }
+        static uint32_t since_flush = 0;
+        if ((since_flush += frames) >= audio::kRate) since_flush = 0, std::fflush(stems);
+    }
     // the volume setting, squared to follow loudness, and silence in the background if asked; a change ramps over the
     // block so it doesn't click
     static float gain = 1.0f;
@@ -562,6 +624,19 @@ void Render(float* out, uint32_t frames) {
         out[i * 2 + 1] = limit(out[i * 2 + 1] * g);
     }
     gain = want;
+    // XBE_AUDIO_RAW=<file>: the mix as heard, stereo 32-bit float at 48 kHz with no header (ffmpeg -f f32le -ar 48000
+    // -ac 2), to compare a scene's levels with a recording of the console
+    static FILE* raw = [] {
+        const char* p = std::getenv("XBE_AUDIO_RAW");
+        FILE* f = p ? std::fopen(p, "wb") : nullptr;
+        if (p) LOGR("dsound: the mix goes to %s%s", p, f ? "" : " (can't open it)");
+        return f;
+    }();
+    static uint32_t raw_frames = 0;
+    if (raw) {
+        std::fwrite(out, sizeof(float), size_t(frames) * 2, raw);
+        if ((raw_frames += frames) >= audio::kRate) raw_frames = 0, std::fflush(raw);
+    }
     static uint64_t rendered = 0;
     if (g_trace && (rendered += frames) >= audio::kRate) {
         rendered = 0;
