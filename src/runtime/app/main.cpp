@@ -380,7 +380,11 @@ void Pace(uint32_t vblanks) {
 int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
     app::InstallCrashHandler();
     timeBeginPeriod(1);
-    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    // in real pixels: a DPI-unaware window on a 4K desktop at 200% is a 1920x1080 one Windows stretches (issue #10).
+    // The process's setting fails if something set it first (an overlay hooked in at start), so this thread, the
+    // window's, is made aware too, and the renderer asks for the window's size the same way (vulkan.cpp)
+    const bool process_dpi = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     // one log a session: a relaunch into another image carries on its predecessor's
     bool relaunched = std::wcsstr(GetCommandLineW(), L"--relaunched") != nullptr;
     std::string log = app::kGame.log;
@@ -391,6 +395,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
     if (app::kGame.init) app::kGame.init();
     if (relaunched && !logx::kVerbose) LOGR("Relaunched: %s", IMAGE_XBE);
     else app::LogSystem();
+    if (!process_dpi)
+        LOGR("display: the process's DPI awareness was already set (%d), its window thread is made per-monitor aware",
+             int(GetAwarenessFromDpiAwarenessContext(GetDpiAwarenessContextForProcess(GetCurrentProcess()))));
 
     app::GameFiles game;
     if (!app::FindGame(game)) return 1;

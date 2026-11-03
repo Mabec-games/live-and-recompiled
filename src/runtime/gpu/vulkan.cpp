@@ -769,8 +769,13 @@ VKAPI_ATTR VkBool32 VKAPI_CALL DebugMessage(VkDebugUtilsMessageSeverityFlagBitsE
 // the window's client area
 VkExtent2D WindowExtent() {
 #ifdef _WIN32
+    // in real pixels whatever this thread's DPI awareness: Windows answers in the caller's, and an unaware render
+    // thread got a 4K window at 200% as 1920x1080, which the swap chain then took (issue #10)
+    DPI_AWARENESS_CONTEXT was = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     RECT rc;
-    if (!GetClientRect(static_cast<HWND>(app::Window()), &rc)) return {0, 0};
+    const BOOL ok = GetClientRect(static_cast<HWND>(app::Window()), &rc);
+    if (was) SetThreadDpiAwarenessContext(was);
+    if (!ok) return {0, 0};
     return {uint32_t(std::max<LONG>(rc.right - rc.left, 0)), uint32_t(std::max<LONG>(rc.bottom - rc.top, 0))};
 #else
     VkExtent2D e{};
@@ -1817,6 +1822,14 @@ bool VulkanBackend::CreateSwapChain() {
     if (swap_) vkDestroySwapchainKHR(dev_, swap_, nullptr);
     swap_ = sc;
     swap_fmt_ = fmt.format;
+    if (ci.imageExtent.width != bb_w_ || ci.imageExtent.height != bb_h_) {
+        // what is drawn and shown, once a size: a picture smaller than the setting asks is the window's (issue #10)
+        const app::Mode out = app::Output();
+        const VkExtent2D win = WindowExtent();
+        LOGR("display: swap chain %ux%u (window %ux%u, resolution %ux%u, %u%% render, the game's %ux%u drawn at %.2fx)",
+             ci.imageExtent.width, ci.imageExtent.height, win.width, win.height, out.width, out.height,
+             app::Get().render_percent, guest_w_, guest_h_, app::RenderScale(guest_h_));
+    }
     bb_w_ = ci.imageExtent.width;
     bb_h_ = ci.imageExtent.height;
     vkGetSwapchainImagesKHR(dev_, swap_, &n, nullptr);
