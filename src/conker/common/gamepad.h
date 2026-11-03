@@ -9,9 +9,9 @@
 namespace gamepad {
 
 // [playerN] invert_aim: the right stick's up aims down while aiming (the game's Invert Aim; the camera and the mouse
-// keep theirs)
+// keep theirs), in single player and multiplayer alike (multiplayer's own profile setting is overridden)
 extern bool g_invert_aim[input::kPorts];
-// [playerN] vibration: the player's controller rumbles (the game's Vibration)
+// [playerN] vibration: the player's controller rumbles (the game's Vibration), in single player and multiplayer
 extern bool g_vibration[input::kPorts];
 // [playerN] vibration_percent: how hard it rumbles, 0..100 of the game's strength
 extern uint32_t g_vibration_percent[input::kPorts];

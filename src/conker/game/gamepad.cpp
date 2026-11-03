@@ -22,6 +22,13 @@
 // defaults by 0x352410). The function runs for each player in turn (0x4D320, the player whose actions struct
 // 0x763260 + edx*0x1B0 it fills), so the player's own settings go into the bytes before each read; the game's menus
 // and a save loaded don't change them.
+// In multiplayer ([0x7819D5] set) it reads neither byte: players 1 and 2 take theirs from their multiplayer profile
+// ([0x862CD0 + edx*4]: scheme +0x11B4, invert +0x11B5, vibration +0x11B6, made by 0x351D90 with invert off) and
+// players 3 and 4 get invert off. Multiplayer's control schemes (0x68C308) take *edi the other way round from single
+// player's (0x8470F8): 0 there already turns the stick's up into looking down, so the game's own default inverted the
+// multiplayer camera (issue #13). So the player's invert is written into *edi once it returns, 1 in single player and 0
+// in multiplayer for invert_aim on, and their vibration is applied where the motors are set (Rumble): invert_aim and
+// vibration are one setting each, and up looks up in both modes unless invert_aim is on.
 bool gamepad::g_invert_aim[input::kPorts] = {};
 bool gamepad::g_vibration[input::kPorts] = {true, true, true, true};
 uint32_t gamepad::g_vibration_percent[input::kPorts] = {100, 100, 100, 100};
@@ -29,19 +36,35 @@ uint32_t gamepad::g_vibration_percent[input::kPorts] = {100, 100, 100, 100};
 // the motors' speeds the game sets (XInputSetState, the player's port) scaled; a change applies from the next rumble
 void gamepad::Rumble(int port, uint16_t& left, uint16_t& right) {
     if (port < 0 || port >= input::kPorts) return;
+    if (!g_vibration[port]) {  // multiplayer starts rumbles from its profile's vibration, not the bytes above
+        left = right = 0;
+        return;
+    }
     const uint32_t percent = std::min(g_vibration_percent[port], 100u);
     left = uint16_t(uint32_t(left) * percent / 100);
     right = uint16_t(uint32_t(right) * percent / 100);
 }
 
 X86_EXTERN_FUNC(__imp__sub_0004D1F0);
+// the path 0x4D1F0 takes: multiplayer's when [0x7819D5] is set, unless the player's entry in the table at
+// [0x84A5F8] (0x6D0 bytes each, +0x564) points at a zero byte
+static bool MultiplayerPath(uint32_t player) {
+    const uint8_t* m = mem::Base();
+    if (!m[0x7819D5]) return false;
+    const uint32_t entry = kernel::R32(kernel::R32(0x84A5F8) + player * 0x6D0 + 0x564);
+    return !(entry && !m[entry]);
+}
+
 X86_FUNC(sub_0004D1F0) {
     const uint32_t player = ctx.edx;
+    const uint32_t invert = ctx.edi;  // the byte it fills with the player's invert
     if (player < uint32_t(input::kPorts)) {
         base[0x84B140] = gamepad::g_invert_aim[player] ? 0 : 1;
         base[0x84B141] = gamepad::g_vibration[player] ? 1 : 0;
     }
+    const bool multiplayer = MultiplayerPath(player);
     __imp__sub_0004D1F0(ctx, base);
+    if (player < uint32_t(input::kPorts)) base[invert] = (gamepad::g_invert_aim[player] != multiplayer) ? 1 : 0;
 }
 
 // 0x203B50: the pause menu's input, once a frame while paused (0x204060). Its page is [0x849AF8]: 0 the pause screen,
