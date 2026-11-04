@@ -568,12 +568,13 @@ void Render(float* out, uint32_t frames) {
                 std::memcpy(&bus[size_t(b) * frames + at], &frame[b * dsfx::kFrame], n * 4);
         }
     }
-    // the GP's output: the speaker bins with their headroom back, the centre at -3 dB to both sides. With an effects
-    // image the GP outputs bins 0-5 and the crosstalk inputs reach them through its canceller; without one they are
-    // heard as the sides they stand for. The sub, the effect sends and a multipass bin nothing reads are not heard.
+    // the GP's output: the speaker bins with their headroom back, the centre and back pair at -3 dB (0.707f) to both sides.
+    // With an effects image the GP outputs bins 0-5 and the crosstalk inputs reach them through its canceller; without one
+    // they are heard as the sides they stand for. The sub, the effect sends and a multipass bin nothing reads are not heard.
     for (uint32_t b = 0; b < kBins; b++) {
         if (!Speaker(b) || (b > 5 && dsfx::Loaded())) continue;
-        float g = float(1 << g_bin_headroom[b]) * (b == 2 ? 0.707f : 1.0f);
+        float fold = (b == 2 || b == 4 || b == 5) ? 0.707f : 1.0f;
+        float g = float(1 << g_bin_headroom[b]) * fold;
         const float* src = &bus[size_t(b) * frames];
         for (uint32_t i = 0; i < frames; i++) {
             if (b == 2 || !(b & 1)) out[i * 2] += src[i] * g;
@@ -585,8 +586,8 @@ void Render(float* out, uint32_t frames) {
         static double acc[12] = {};
         static uint32_t in_block = 0;
         const float g[5] = {float(1 << g_bin_headroom[0]), float(1 << g_bin_headroom[1]),
-                            float(1 << g_bin_headroom[2]) * 0.707f, float(1 << g_bin_headroom[4]),
-                            float(1 << g_bin_headroom[5])};
+                            float(1 << g_bin_headroom[2]) * 0.707f, float(1 << g_bin_headroom[4]) * 0.707f,
+                            float(1 << g_bin_headroom[5]) * 0.707f};
         for (uint32_t i = 0; i < frames; i++) {
             for (int k = 0; k < 5; k++) {
                 const float d = direct[size_t(k) * frames + i] * g[k];
@@ -961,7 +962,14 @@ HLE_STDCALL(IDirectSound_Release, 1) { return 0; }
 HLE_STDCALL(DirectSoundUseFullHRTF, 0) { return 0; }
 HLE_STDCALL(DirectSoundUseLightHRTF, 0) { return 0; }
 HLE_STDCALL(IDirectSound_GetSpeakerConfig, 2) {
-    W32(a[1], 0);  // DSSPEAKER_STEREO
+    constexpr uint32_t kStereo = 0;
+    constexpr uint32_t kMono = 1;  // DSSPEAKER_MONO
+    constexpr uint32_t kSurroundAc3 = 0x2 | 0x10000;  // DSSPEAKER_SURROUND | DSSPEAKER_ENABLE_AC3
+    uint32_t flags = kernel::AudioFlags();
+    uint32_t config = kStereo;
+    if (flags & 1) config = kMono;
+    else if (flags & 2) config = kSurroundAc3;
+    W32(a[1], config);
     return 0;
 }
 // (this, effect, byte offset, data, bytes, apply): into the effect's state, as the GP reads it

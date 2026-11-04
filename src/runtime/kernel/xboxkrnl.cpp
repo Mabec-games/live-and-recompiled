@@ -1278,10 +1278,11 @@ KERNEL_EXPORT(29, ExSaveNonVolatileSetting, 4) {
 // widescreen (a 4:3 output plays the console's 4:3), 480p
 static uint32_t VideoFlags() { return (app::Widescreen() ? 0x00010000 : 0) | 0x00080000; }
 // XC_AUDIO_FLAGS; XBE_AUDIO_FLAGS=<hex> tries another (a test of how the title mixes for each speaker setting)
-static uint32_t AudioFlags() {
+// 0x00000000 = Stereo, 0x00000001 = Mono, 0x00000002 = Dolby Surround, 0x00010000 = AC3 / Dolby Digital
+uint32_t AudioFlags() {
     static const uint32_t flags = [] {
         const char* e = std::getenv("XBE_AUDIO_FLAGS");
-        const uint32_t f = e ? uint32_t(std::strtoul(e, nullptr, 16)) : 0x00010001;
+        const uint32_t f = e ? uint32_t(std::strtoul(e, nullptr, 16)) : 0;
         if (e) LOGR("kernel: audio flags %08X (XBE_AUDIO_FLAGS)", f);
         return f;
     }();

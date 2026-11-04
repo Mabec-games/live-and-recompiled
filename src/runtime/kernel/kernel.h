@@ -244,4 +244,7 @@ const char* OrdinalName(uint32_t ordinal);  // public name, "?" past the table
 extern uint32_t g_tick_count_va;
 extern uint32_t g_launch_data_page_va;
 
+// XC_AUDIO_FLAGS
+uint32_t AudioFlags();
+
 }  // namespace kernel
