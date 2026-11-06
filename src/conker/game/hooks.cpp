@@ -326,7 +326,7 @@ static void Voice3d(uint32_t obj, uint32_t d) {
     if (trace)
         LOGR("dsound3d: %08X flags %02X dist %d cone %d pairA %d %d pairB %d %d i3dl2 %d %d pitch %d ang %.1f %.2f", obj,
              R32(d), i(4), i(8), i(0xC), i(0x10), i(0x14), i(0x18), i(0x1C), i(0x20), i(0x24), f(0x28), f(0x2C));
-    dsound::SetVoice3d(obj, R32(d), i(4), i(8), i(0x1C), f(0x28));
+    dsound::SetVoice3d(obj, R32(d), i(4), i(8), i(0x1C), f(0x28), i(0x14), i(0x18));
 }
 // hooked at the entries the title calls (the recompiler folds 0x4C4EF5 into 0x4C5235's jump), both (object, descriptor)
 X86_FUNC(sub_004C5235) {

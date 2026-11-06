@@ -88,7 +88,7 @@ void SelectDevice(const std::string& id) {
     g_change++;
 }
 
-void StartOutput(std::function<void(float*, uint32_t)> render) {
+void StartOutput(std::function<void(float*, uint32_t, uint32_t)> render) {
     {
         std::lock_guard<std::mutex> lock(g_lock);
         g_want = Wide(app::Get().audio_device);
@@ -98,18 +98,15 @@ void StartOutput(std::function<void(float*, uint32_t)> render) {
         IXAudio2* xa = nullptr;
         IXAudio2MasteringVoice* master = nullptr;
         IXAudio2SourceVoice* voice = nullptr;
-        WAVEFORMATEX wf{};
-        wf.wFormatTag = WAVE_FORMAT_IEEE_FLOAT;
-        wf.nChannels = 2;
-        wf.nSamplesPerSec = kRate;
-        wf.wBitsPerSample = 32;
-        wf.nBlockAlign = 8;
-        wf.nAvgBytesPerSec = kRate * 8;
+        uint32_t ch = kStereo;  // the source voice's channels, what render fills
         if (FAILED(XAudio2Create(&xa, 0, XAUDIO2_DEFAULT_PROCESSOR))) {
             LOGE("audio: XAudio2 unavailable, no sound");
             return;
         }
-        // (re)creates the voices on the wanted device, the default when it is gone
+        // (re)creates the voices on the wanted device, the default when it is gone. The mastering voice takes the
+        // endpoint's own layout (2, 5.1, 7.1, or what a virtual surround headset or Windows Sonic shows); the source
+        // voice is stereo or 5.1 by the speakers setting and that layout, and XAudio2 maps it onto the endpoint
+        // (5.1 onto a stereo endpoint is folded down by it)
         auto open = [&] {
             if (voice) voice->DestroyVoice();
             if (master) master->DestroyVoice();
@@ -122,9 +119,34 @@ void StartOutput(std::function<void(float*, uint32_t)> render) {
             if (want.empty() || FAILED(xa->CreateMasteringVoice(&master, XAUDIO2_DEFAULT_CHANNELS,
                                                                 XAUDIO2_DEFAULT_SAMPLERATE, 0, want.c_str())))
                 master = nullptr, xa->CreateMasteringVoice(&master);
-            if (master) xa->CreateSourceVoice(&voice, &wf);
-            if (voice) voice->Start();
-            return voice != nullptr;
+            if (!master) return false;
+            XAUDIO2_VOICE_DETAILS details{};
+            master->GetVoiceDetails(&details);
+            DWORD mask = 0;
+            master->GetChannelMask(&mask);
+            ch = ChannelsFor(app::Get().speakers, details.InputChannels);
+            WAVEFORMATEXTENSIBLE wf{};
+            wf.Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
+            wf.Format.nChannels = WORD(ch);
+            wf.Format.nSamplesPerSec = kRate;
+            wf.Format.wBitsPerSample = 32;
+            wf.Format.nBlockAlign = WORD(ch * 4);
+            wf.Format.nAvgBytesPerSec = kRate * ch * 4;
+            wf.Format.cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
+            wf.Samples.wValidBitsPerSample = 32;
+            // SPEAKER_FRONT_LEFT | FRONT_RIGHT (| FRONT_CENTER | LOW_FREQUENCY | BACK_LEFT | BACK_RIGHT)
+            wf.dwChannelMask = ch == kSurround ? 0x3F : 0x3;
+            // KSDATAFORMAT_SUBTYPE_IEEE_FLOAT
+            wf.SubFormat = {0x00000003, 0x0000, 0x0010, {0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}};
+            if (FAILED(xa->CreateSourceVoice(&voice, &wf.Format))) {
+                voice = nullptr;
+                return false;
+            }
+            g_channels = ch;
+            LOGI("audio: output %u channels (endpoint %u, mask %08lX, speakers %s)", ch, details.InputChannels,
+                 static_cast<unsigned long>(mask), app::Get().speakers.c_str());
+            voice->Start();
+            return true;
         };
         uint32_t seen = g_change.load();
         if (!open()) {
@@ -132,7 +154,7 @@ void StartOutput(std::function<void(float*, uint32_t)> render) {
             return;
         }
         constexpr uint32_t kFrames = kRate / 100, kSlots = 4;
-        std::vector<float> bufs(kSlots * kFrames * 2);
+        std::vector<float> bufs(kSlots * kFrames * kSurround);  // room for the widest layout
         for (uint32_t n = 0;;) {
             if (seen != g_change.load()) {
                 seen = g_change.load();
@@ -147,10 +169,10 @@ void StartOutput(std::function<void(float*, uint32_t)> render) {
                 Sleep(2);
                 continue;
             }
-            float* b = &bufs[(n % kSlots) * kFrames * 2];
-            render(b, kFrames);
+            float* b = &bufs[(n % kSlots) * kFrames * kSurround];
+            render(b, kFrames, ch);
             XAUDIO2_BUFFER xb{};
-            xb.AudioBytes = kFrames * 8;
+            xb.AudioBytes = kFrames * ch * 4;
             xb.pAudioData = reinterpret_cast<const BYTE*>(b);
             voice->SubmitSourceBuffer(&xb);
             n++;  // only a submitted buffer takes a slot, XAudio2 still reads the queued ones

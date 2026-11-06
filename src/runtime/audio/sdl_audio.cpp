@@ -12,18 +12,21 @@ namespace audio {
 
 namespace {
 
-// what the device asks for, rendered 10 ms at a time as on XAudio2
+// what the device asks for, rendered 10 ms at a time as on XAudio2, in the channels the stream was opened with
 void Pull(void* user, SDL_AudioStream* stream, int additional, int) {
-    auto& render = *static_cast<std::function<void(float*, uint32_t)>*>(user);
+    auto& render = *static_cast<std::function<void(float*, uint32_t, uint32_t)>*>(user);
     constexpr uint32_t kFrames = kRate / 100;
-    static std::vector<float> buf(kFrames * 2);
-    for (int left = additional; left > 0; left -= int(kFrames * 8)) {
-        render(buf.data(), kFrames);
-        SDL_PutAudioStreamData(stream, buf.data(), int(kFrames * 8));
+    const uint32_t ch = g_channels.load();
+    static std::vector<float> buf;
+    buf.resize(size_t(kFrames) * ch);
+    const int bytes = int(kFrames * ch * sizeof(float));
+    for (int left = additional; left > 0; left -= bytes) {
+        render(buf.data(), kFrames, ch);
+        SDL_PutAudioStreamData(stream, buf.data(), bytes);
     }
 }
 
-std::function<void(float*, uint32_t)> g_render;  // the device's callback reads it for the run
+std::function<void(float*, uint32_t, uint32_t)> g_render;  // the device's callback reads it for the run
 std::mutex g_lock;                                 // the stream and what it plays on
 SDL_AudioStream* g_stream = nullptr;
 bool g_started = false;
@@ -42,13 +45,22 @@ SDL_AudioDeviceID Find(const std::string& name) {
 // (re)opens the output on the named device; g_lock held
 void Open(const std::string& name) {
     if (g_stream) SDL_DestroyAudioStream(g_stream);
-    SDL_AudioSpec spec{SDL_AUDIO_F32, 2, int(kRate)};
-    g_stream = SDL_OpenAudioDeviceStream(name.empty() ? SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK : Find(name), &spec, Pull,
-                                         &g_render);
+    g_stream = nullptr;
+    const SDL_AudioDeviceID dev = name.empty() ? SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK : Find(name);
+    // the device's own channels pick stereo or 5.1 (SDL's 6 channel order is the mix bins' order); SDL converts
+    // what we give to what the device takes, so a forced 5.1 on a stereo device is folded down by SDL
+    SDL_AudioSpec have{};
+    int device_channels = 2;
+    if (SDL_GetAudioDeviceFormat(dev, &have, nullptr)) device_channels = have.channels;
+    const uint32_t ch = ChannelsFor(app::Get().speakers, uint32_t(device_channels));
+    g_channels = ch;
+    SDL_AudioSpec spec{SDL_AUDIO_F32, int(ch), int(kRate)};
+    g_stream = SDL_OpenAudioDeviceStream(dev, &spec, Pull, &g_render);
     if (!g_stream) {
         LOGE("audio: no output device, no sound: %s", SDL_GetError());
         return;
     }
+    LOGI("audio: output %u channels (device %d, speakers %s)", ch, device_channels, app::Get().speakers.c_str());
     SDL_ResumeAudioStreamDevice(g_stream);
 }
 
@@ -71,7 +83,7 @@ void SelectDevice(const std::string& id) {
     if (g_started) Open(id);
 }
 
-void StartOutput(std::function<void(float*, uint32_t)> render) {
+void StartOutput(std::function<void(float*, uint32_t, uint32_t)> render) {
     if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
         LOGE("audio: SDL audio unavailable, no sound: %s", SDL_GetError());
         return;

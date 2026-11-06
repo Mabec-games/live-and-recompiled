@@ -1076,6 +1076,19 @@ void Draw(double fps) {
                             }
                         ImGui::EndCombo();
                     }
+                    // the output's channels: a change reopens it on the same device
+                    static const char* kSpeakers[] = {"auto", "stereo", "5.1"};
+                    int at = 0;
+                    for (int i = 0; i < 3; i++)
+                        if (s.speakers == kSpeakers[i]) at = i;
+                    if (ImGui::Combo("Speakers", &at, "Auto\0Stereo\0" "5.1 surround\0")) {
+                        s.speakers = kSpeakers[at];
+                        audio::SelectDevice(s.audio_device);
+                    }
+                    Hint("Auto: 5.1 when the output device is set up for 5.1 or more (surround speakers, or a sound card "
+                         "or headset that turns 5.1 into positional headphone sound), else stereo. Stereo always folds "
+                         "the mix down; 5.1 always sends six channels.",
+                         true);
                 }
                 ImGui::Checkbox("Mute in background", &s.mute_in_background);
                 Hint("No sound while you are in another window.", true);

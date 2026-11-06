@@ -167,6 +167,10 @@ struct Voice {
     float p[3] = {}, min_dist = 1, max_dist = 1e9f;
     bool calc3d = false;  // the title's own 3D calculator drives the voice (dsound::SetVoice3d)
     float att3d = 1, pan3d = 0;
+    bool az3d = false;  // the calculator has given the voice an azimuth (a voice feeding a submix takes none)
+    float fb3d = 1;  // the calculator's azimuth as front (1) to back (-1), cos(azimuth): a 5.1 output places it by this
+    float center3d = 1;  // pairB2: center speaker gain from the 3D calculator (-100 dB when off-center)
+    float xtalk3d = 1;   // pairB1: crosstalk/surround gain from the 3D calculator
     int32_t dist_mb = 0, cone_mb = 0, direct_mb = 0;  // F3: the calculator's terms att3d sums
     double energy = 0;  // XBE_TRACE_DSOUND: sum of squares mixed since the last report
     double recent = 0;  // F3: mean square mixed, smoothed over about half a second
@@ -332,10 +336,13 @@ int Routes(const Voice& v, Route* r) {
     const uint8_t* bin = v.nbins ? v.bin : channels == 4 ? kQuad : kSpeakers;
     uint32_t n = v.nbins ? v.nbins : std::clamp<uint32_t>(channels, 2, 6), voices = (channels - 1) / 2 + 1;
     uint32_t per = std::max<uint32_t>(n / voices, 2);
-    float att = 1, pan = 0;
+    float att = 1, pan = 0, fb = 1;
+    bool placed = false;  // a 3D voice, which a 5.1 output places front to back as well
     if (v.calc3d) {
         att = v.att3d;
         pan = v.pan3d;
+        fb = v.fb3d;
+        placed = v.az3d;
     } else if (v.is3d && v.mode != 2) {
         bool rel = v.mode == 1;  // the position is already in listener space
         float d[3] = {v.p[0], v.p[1], v.p[2]};
@@ -354,7 +361,28 @@ int Routes(const Voice& v, Route* r) {
                           g_top[0] * g_front[1] - g_top[1] * g_front[0]};
         float side = rel ? d[0] : d[0] * right[0] + d[1] * right[1] + d[2] * right[2];
         pan = dist > 1e-3f ? side / dist : 0.0f;
+        const float ahead = rel ? d[2] : d[0] * g_front[0] + d[1] * g_front[1] + d[2] * g_front[2];
+        fb = dist > 1e-3f ? ahead / dist : 1.0f;
+        placed = true;
     }
+    // Front to back, on a 5.1 output only: the title sends a 3D voice to the front and the back pairs alike (on the
+    // console the VP's HRTF filters tell them apart), which a stereo fold hears as one. On six speakers the front pair
+    // (0, 1 and the crosstalk 6, 7) is kept as the sound comes from ahead and the back pair (4, 5, 8, 9) as it comes
+    // from behind, by the law the side pan uses: both whole at the side, so a sound is never louder than before.
+    // XBE_AUDIO_FB=0 leaves them alike.
+    static const bool fb_on = [] {
+        const char* e = std::getenv("XBE_AUDIO_FB");
+        return !(e && e[0] == '0');
+    }();
+    const bool surround = audio::g_channels.load() == audio::kSurround;
+    placed = placed && fb_on && surround;
+    const float front = std::min(1.0f, 1.0f + fb), back = std::min(1.0f, 1.0f - fb);
+    auto depth = [&](uint32_t b) {
+        if (!placed) return 1.0f;
+        if (b == 0 || b == 1 || b == 6 || b == 7) return front;
+        if (b == 4 || b == 5 || b == 8 || b == 9) return back;
+        return 1.0f;
+    };
     // with no effects image, a voice heard only through effects (or a submix it has no target for) plays dry on the
     // front pair, at its loudest send
     bool heard = dsfx::Loaded();
@@ -379,8 +407,16 @@ int Routes(const Voice& v, Route* r) {
                 add(0, c, x * left);
                 add(1, c, x * right);
             } else {
-                // even bins are left, odd right, 2 is the centre
-                add(b, c, Speaker(b) && b != 2 ? x * (b & 1 ? right : left) : x);
+                // even bins are left, odd right, 2 is the centre.
+                // On a 5.1 output, the guest 3D engine's center (bin 2) and crosstalk (bins 6-9) gains (pairB). The
+                // stereo fold leaves them out: its 3D levels were matched to the console without them (XtalkShare),
+                // and with them a folded 3D sound comes 5-8 dB quieter.
+                float scale = 1.0f;
+                if (v.calc3d && surround) {
+                    if (b == 2) scale = v.center3d;
+                    else if (CrosstalkInput(b)) scale = v.xtalk3d;
+                }
+                add(b, c, (Speaker(b) && b != 2 ? x * (b & 1 ? right : left) * depth(b) : x) * scale);
             }
         }
     }
@@ -498,12 +534,14 @@ void Describe(uint32_t obj, const Voice& v) {
          v.channels, v.freq ? v.freq : v.rate, v.mixin ? " mixin" : "", v.out, mb(v.volume), mb(v.headroom),
          v.nbins ? "" : " default", bins.c_str(), v.calc3d ? "calc" : v.is3d ? "ds" : "no", mb(v.att3d), d3.c_str(),
          v.pan3d, mb(float(std::sqrt(v.recent))));
+    if (v.az3d) LOGR("dsound:  %08X front/back %.2f", obj, v.fb3d);
 }
 
-void Render(float* out, uint32_t frames) {
+void Render(float* out, uint32_t frames, uint32_t ch) {
     static std::vector<float> bus, ab;
     static std::vector<Voice*> order;
-    std::memset(out, 0, frames * 2 * sizeof(float));
+    const bool surround = ch == audio::kSurround;
+    std::memset(out, 0, size_t(frames) * ch * sizeof(float));
     if (Held()) return;  // a host menu is up: nothing plays on, nothing is used up
     bus.assign(size_t(kBins) * frames, 0.0f);
     ab.resize(frames * kChannels);
@@ -571,14 +609,29 @@ void Render(float* out, uint32_t frames) {
     // the GP's output: the speaker bins with their headroom back, the centre and back pair at -3 dB (0.707f) to both sides.
     // With an effects image the GP outputs bins 0-5 and the crosstalk inputs reach them through its canceller; without one
     // they are heard as the sides they stand for. The sub, the effect sends and a multipass bin nothing reads are not heard.
-    for (uint32_t b = 0; b < kBins; b++) {
-        if (!Speaker(b) || (b > 5 && dsfx::Loaded())) continue;
-        float fold = (b == 2 || b == 4 || b == 5) ? 0.707f : 1.0f;
-        float g = float(1 << g_bin_headroom[b]) * fold;
-        const float* src = &bus[size_t(b) * frames];
-        for (uint32_t i = 0; i < frames; i++) {
-            if (b == 2 || !(b & 1)) out[i * 2] += src[i] * g;
-            if (b == 2 || (b & 1)) out[i * 2 + 1] += src[i] * g;
+    //
+    // On a 5.1 output nothing is folded: bins 0-5 are the speakers in the output's own order (front L, front R, centre,
+    // the sub, back L, back R), as the console's GP gives them to its AC3 encoder. Without an effects image the
+    // crosstalk inputs go to the speakers they stand for, 6 and 7 the front pair and 8 and 9 the back pair.
+    if (surround) {
+        for (uint32_t b = 0; b < kBins; b++) {
+            const bool sub = b == 3;
+            if (!(Speaker(b) || sub) || (b > 5 && dsfx::Loaded())) continue;
+            const uint32_t to = b < 6 ? b : b < 8 ? b - 6 : b - 4;  // 6, 7 -> 0, 1; 8, 9 -> 4, 5
+            const float g = float(1 << g_bin_headroom[b]);
+            const float* src = &bus[size_t(b) * frames];
+            for (uint32_t i = 0; i < frames; i++) out[i * ch + to] += src[i] * g;
+        }
+    } else {
+        for (uint32_t b = 0; b < kBins; b++) {
+            if (!Speaker(b) || (b > 5 && dsfx::Loaded())) continue;
+            float fold = (b == 2 || b == 4 || b == 5) ? 0.707f : 1.0f;
+            float g = float(1 << g_bin_headroom[b]) * fold;
+            const float* src = &bus[size_t(b) * frames];
+            for (uint32_t i = 0; i < frames; i++) {
+                if (b == 2 || !(b & 1)) out[i * 2] += src[i] * g;
+                if (b == 2 || (b & 1)) out[i * 2 + 1] += src[i] * g;
+            }
         }
     }
     if (stems) {
@@ -595,8 +648,8 @@ void Render(float* out, uint32_t frames) {
                 acc[k] += double(d) * d;
                 acc[5 + k] += double(fx) * fx;
             }
-            acc[10] += double(out[i * 2]) * out[i * 2];
-            acc[11] += double(out[i * 2 + 1]) * out[i * 2 + 1];
+            acc[10] += double(out[i * ch]) * out[i * ch];  // the front pair on a 5.1 output
+            acc[11] += double(out[i * ch + 1]) * out[i * ch + 1];
             if (++in_block == audio::kRate / 100) {
                 float rec[12];
                 for (int k = 0; k < 12; k++) rec[k] = float(acc[k]), acc[k] = 0;
@@ -621,21 +674,20 @@ void Render(float* out, uint32_t frames) {
     };
     for (uint32_t i = 0; i < frames; i++) {
         float g = gain + (want - gain) * float(i + 1) / float(frames);
-        out[i * 2] = limit(out[i * 2] * g);
-        out[i * 2 + 1] = limit(out[i * 2 + 1] * g);
+        for (uint32_t c = 0; c < ch; c++) out[i * ch + c] = limit(out[i * ch + c] * g);
     }
     gain = want;
-    // XBE_AUDIO_RAW=<file>: the mix as heard, stereo 32-bit float at 48 kHz with no header (ffmpeg -f f32le -ar 48000
-    // -ac 2), to compare a scene's levels with a recording of the console
+    // XBE_AUDIO_RAW=<file>: the mix as heard, 32-bit float at 48 kHz with no header (ffmpeg -f f32le -ar 48000 -ac 2,
+    // or -ac 6 on a 5.1 output: the log says which), to compare a scene's levels with a recording of the console
     static FILE* raw = [] {
         const char* p = std::getenv("XBE_AUDIO_RAW");
         FILE* f = p ? std::fopen(p, "wb") : nullptr;
-        if (p) LOGR("dsound: the mix goes to %s%s", p, f ? "" : " (can't open it)");
+        if (p) LOGR("dsound: the mix goes to %s%s, %u channels", p, f ? "" : " (can't open it)", audio::g_channels.load());
         return f;
     }();
     static uint32_t raw_frames = 0;
     if (raw) {
-        std::fwrite(out, sizeof(float), size_t(frames) * 2, raw);
+        std::fwrite(out, sizeof(float), size_t(frames) * ch, raw);
         if ((raw_frames += frames) >= audio::kRate) raw_frames = 0, std::fflush(raw);
     }
     static uint64_t rendered = 0;
@@ -686,9 +738,9 @@ void Run(X86Context& ctx, const std::vector<Done>& done) {
 void Start() {
     if (g_started) return;
     g_started = true;
-    audio::StartOutput([](float* out, uint32_t frames) {
-        Render(out, frames);
-        audio::MixCues(out, frames);  // after Render, which returns early while a host menu is up
+    audio::StartOutput([](float* out, uint32_t frames, uint32_t channels) {
+        Render(out, frames, channels);
+        audio::MixCues(out, frames, channels);  // after Render, which returns early while a host menu is up
     });
     // the APU's free running 48 kHz sample counter (0xFE80200C): XACT times fades, stops and transitions with it, so
     // with the scratch register left at 0 its clock never moved and timed events never ended
@@ -851,7 +903,7 @@ float F32(uint32_t v) {
 }  // namespace
 
 void dsound::SetVoice3d(uint32_t obj, uint32_t changed, int32_t dist_mb, int32_t cone_mb, int32_t direct_mb,
-                        float azimuth) {
+                        float azimuth, int32_t pair_b1, int32_t pair_b2) {
     std::lock_guard<std::recursive_mutex> lock(g_lock);
     Voice* v = Find(obj);
     if (!v) return;
@@ -860,7 +912,25 @@ void dsound::SetVoice3d(uint32_t obj, uint32_t changed, int32_t dist_mb, int32_t
     if (changed & k3dCone) v->cone_mb = cone_mb;
     if (changed & k3dDirect) v->direct_mb = direct_mb;
     v->att3d = Db(std::max(v->dist_mb + v->cone_mb + v->direct_mb, -10000));
-    if (changed & k3dAzimuth) v->pan3d = std::sin(azimuth * 3.14159265f / 180.0f);
+    if (changed & k3dAzimuth) {
+        v->pan3d = std::sin(azimuth * 3.14159265f / 180.0f);
+        v->fb3d = std::cos(azimuth * 3.14159265f / 180.0f);
+        v->az3d = true;
+        // pairB: front speaker balance computed by the 3D engine.
+        // pair_b2 is the center speaker gain; pair_b1 is the surround/crosstalk gain.
+        // XBE_AUDIO_PAIRB=0 disables pairB scaling.
+        static const bool pairb_on = [] {
+            const char* e = std::getenv("XBE_AUDIO_PAIRB");
+            return !(e && e[0] == '0');
+        }();
+        if (pairb_on && (pair_b1 != 0 || pair_b2 != 0)) {
+            v->xtalk3d = Db(std::max(pair_b1, -10000));
+            v->center3d = Db(std::max(pair_b2, -10000));
+        } else {
+            v->xtalk3d = 1.0f;
+            v->center3d = 1.0f;
+        }
+    }
 }
 
 void dsound::LogState() {
@@ -965,10 +1035,12 @@ HLE_STDCALL(IDirectSound_GetSpeakerConfig, 2) {
     constexpr uint32_t kStereo = 0;
     constexpr uint32_t kMono = 1;  // DSSPEAKER_MONO
     constexpr uint32_t kSurroundAc3 = 0x2 | 0x10000;  // DSSPEAKER_SURROUND | DSSPEAKER_ENABLE_AC3
+    constexpr uint32_t kSurround = 0x2;  // DSSPEAKER_SURROUND: what a 5.1 output plays
     uint32_t flags = kernel::AudioFlags();
     uint32_t config = kStereo;
     if (flags & 1) config = kMono;
     else if (flags & 2) config = kSurroundAc3;
+    else if (audio::g_channels.load() == audio::kSurround) config = kSurround;
     W32(a[1], config);
     return 0;
 }

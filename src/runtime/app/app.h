@@ -35,6 +35,8 @@ struct Settings {
     uint32_t ambient_occlusion_radius = 30;
     uint32_t volume = 100;           // the game's sound in %, the mixer's output scaled by its square
     std::string audio_device;         // an audio::Device id, "" the system default
+    // the output's speakers: "auto" (5.1 when the device has six channels or more, else stereo), "stereo" or "5.1"
+    std::string speakers = "auto";
     bool menu_sounds = true;          // the settings menu's sounds (audio::Play)
     bool mute_in_background = false;  // silent while the game window lacks the focus (Background)
     bool shader_warmup = true;       // make the shaders shaders.rec lists while the title boots
