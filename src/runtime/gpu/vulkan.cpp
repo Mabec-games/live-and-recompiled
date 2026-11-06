@@ -3617,7 +3617,7 @@ void VulkanBackend::CaptureShaders(const State& s, const Assembled& a, const Dra
 // for a draw in this one's state and stages, the same again but for clamp, the anisotropy or a sampler cache since
 void VulkanBackend::SetTextureViewsAndSamplers(const State& s, const Assembled& a, const DrawTextures& stages,
                                                Bindings& b, const ViewsAndSamplers* same_state) {
-    bool clamp = UnitTexcoords(a);
+    bool clamp = UnitTexcoords(s, a);
     uint32_t aniso = app::Get().aniso;
     const ViewsAndSamplers* f = same_state;
     if (!f || !f->ok || f->clamp != clamp || f->aniso != aniso || f->samplers_made != samplers_made_) {
@@ -4405,7 +4405,7 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
         // the border colour as the title set it (ARGB), with the D3DTADDRESS codes it came with
         for (int i = 0; i < 4; i++) {
             if (!stages.res[i] && i >= 2) continue;
-            SamplerDesc sd = StageSampler(s, i, stages, UnitTexcoords(a), app::Get().aniso);
+            SamplerDesc sd = StageSampler(s, i, stages, UnitTexcoords(s, a), app::Get().aniso);
             const auto& t = s.tss[size_t(i)];
             fprintf(cap_,
                     "\n     s%d filter %u %u %u addr %u %u lod %g..%g bias %g aniso %u mips %u | d3d addr %u %u border %08X",
@@ -5081,6 +5081,22 @@ void VulkanBackend::Present(const Surface& front) {
     held_since_ = {};
     FlushRun();
     PerfScope perf_present{g_perf.present};
+    {
+        // XBE_CAPTURE_AFTER=<seconds>: one capture that many seconds after the first frame, as F3 would, for when a
+        // key can't be pressed
+        static const double after = [] {
+            const char* e = std::getenv("XBE_CAPTURE_AFTER");
+            return e ? std::atof(e) : 0.0;
+        }();
+        static const auto first = std::chrono::steady_clock::now();
+        static bool done = false;
+        if (after > 0 && !done &&
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - first).count() >= after) {
+            done = true;
+            g_capture = true;
+            LOGR("capture: XBE_CAPTURE_AFTER=%g, capturing this frame", after);
+        }
+    }
     if (cap_) {
         FinishCapture(front);
         // XBE_CAPTURE_FRAMES=N: one F3 captures N frames in a row, to compare frames that alternate

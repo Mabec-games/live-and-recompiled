@@ -738,11 +738,19 @@ void WriteBmp(const std::filesystem::path& p, const std::vector<uint8_t>& px, ui
 // edge's last half texel is drawn too, and wrapped it blends in the opposite edge (thin dark lines on HUD sprites).
 // Clamped, it takes the edge texel instead, which a wrapped texture used once over 0..1 has there anyway. Border
 // is read as clamp too: the dung boulders' floor splats drew their quads' outlines in the border colour.
-bool UnitTexcoords(const Assembled& a) {
+// Only where those inputs are the coordinates the stages get: a texture transform, or a vertex program that works its
+// coordinates out rather than moving an input, can take them past 1. The pub's candle flames (frontend) map v to
+// 2 - y, 1..2 over their 0..1 quad, so wrapped they show the flame and clamped every pixel took the texture's empty
+// last row: no flame at all.
+bool UnitTexcoords(const State& s, const Assembled& a) {
     constexpr float kLo = -1e-4f;
     constexpr float kHi = 1.0001f;
     constexpr uint32_t kSmallDrawVertices = 4096;  // most vertices a small draw has
     if (!a.vertices.empty() || !a.vertex_count || a.vertex_count > kSmallDrawVertices) return false;
+    const bool program = (s.vs_handle & 1) && s.vs && !s.vs->program.empty();
+    if (!program)
+        for (int i = 0; i < 4; i++)
+            if (s.tss[size_t(i)][kTssTextureTransformFlags] & 0xFF) return false;
     bool any = false;
     for (int r = 0; r < 16; r++) {
         const VertexElement& e = a.elements[size_t(r)];
@@ -756,7 +764,7 @@ bool UnitTexcoords(const Assembled& a) {
         }
         any = true;
     }
-    return any;
+    return any && (!program || ProgramPassesTexcoords(s.vs->program));
 }
 
 void CountedSkip(const State& s, const char* why) {

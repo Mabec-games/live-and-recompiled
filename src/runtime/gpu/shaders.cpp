@@ -711,6 +711,23 @@ PixelKey MakePixelKey(const State& s, const TexInfo tex[4]) {
     return k;
 }
 
+bool ProgramPassesTexcoords(const std::vector<uint32_t>& prog) {
+    for (size_t n = 0; n + 4 <= prog.size(); n += 4) {
+        Tok k{&prog[n]};
+        const uint32_t mac = k.f(1, 21, 4), ilu = k.f(1, 25, 3), omask = k.f(3, 12, 4);
+        const bool use_ilu = k.f(3, 2, 1) == 1;
+        const uint32_t o = k.f(3, 3, 8) & 0xF;
+        const bool writes = omask && k.f(3, 11, 1) && ((use_ilu && ilu) || (!use_ilu && mac && mac != 13));
+        if (writes && o >= 9 && o <= 12) {
+            // a MAC mov of operand A, an input register (mux 2), x then y, not negated
+            if (use_ilu || mac != 1 || k.f(2, 26, 2) != 2 || k.f(1, 8, 1) || k.f(1, 6, 2) != 0 || k.f(1, 4, 2) != 1)
+                return false;
+        }
+        if (k.f(3, 0, 1)) break;  // last instruction
+    }
+    return true;
+}
+
 std::string VertexProgramHlsl(const std::vector<uint32_t>& prog, uint16_t regs, uint64_t decode, uint32_t shading) {
     std::string s = Common(shading);
     s += kVsHelpers;

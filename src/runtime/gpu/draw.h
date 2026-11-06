@@ -373,8 +373,8 @@ FILE* OpenFile(const std::filesystem::path& p, const char* mode);
 // a top down 32 bit BMP of w x h BGRA pixels
 void WriteBmp(const std::filesystem::path& p, const std::vector<uint8_t>& px, uint32_t w, uint32_t h);
 
-// A small draw whose every float2 input lies in 0..1, see draw.cpp
-bool UnitTexcoords(const Assembled& a);
+// A small draw whose every float2 input lies in 0..1 and reaches the stages as it is, see draw.cpp
+bool UnitTexcoords(const State& s, const Assembled& a);
 
 // XBE_TRACE_REPORTS: a draw inside a visibility test that never reaches the GPU leaves the test short of its pixels
 void CountedSkip(const State& s, const char* why);

@@ -155,6 +155,9 @@ PixelKey MakePixelKey(const State& s, const TexInfo tex[4]);
 // shading: a g_program_shading entry, 1 based, 0 none
 std::string VertexProgramHlsl(const std::vector<uint32_t>& program, uint16_t regs, uint64_t decode = 0,
                               uint32_t shading = 0);
+// every texture coordinate the program writes (oT0..oT3) is a vertex input moved as it is (x and y in place, not
+// negated): its draws' coordinates reach the stages as the vertex buffer holds them (UnitTexcoords)
+bool ProgramPassesTexcoords(const std::vector<uint32_t>& program);
 // the g_program_shading entries a program matches, bit i for entry i + 1 (the first 64), whether they are on or not
 uint64_t MatchProgramShading(const std::vector<uint32_t>& program);
 // the g_program_watch entry a program matches, 1 based, 0 none
