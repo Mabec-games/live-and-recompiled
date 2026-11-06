@@ -36,4 +36,9 @@ struct DrawTag {
 };
 DrawTag SetDrawTag(DrawTag tag);
 
+// The draws read off the commands pushed from here until the next SetDrawHidden are left out of the picture (their
+// state changes still apply): a title hides one object's geometry yet runs its draw for what that draw also does
+// (a skeleton the attached objects follow). Returns the setting it replaces.
+bool SetDrawHidden(bool hidden);
+
 }  // namespace d3d

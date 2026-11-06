@@ -13,4 +13,7 @@ extern uint32_t g_volume_db;
 // the gain for audio::g_title_gain
 float AudioGain();
 
+// an in-engine cutscene plays: the game asked 0x4FF00 (each frame of one) in the last 0.25 s
+bool Playing();
+
 }  // namespace cutscenes

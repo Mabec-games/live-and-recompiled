@@ -582,6 +582,7 @@ void LodTraceRun(X86Context& ctx, uint32_t data, uint32_t owner) {
 // among the frame's draws of that place, a model drawn again (a fur's shells) drawing the same commands each time
 namespace {
 DrawTag g_tag;
+bool g_hidden = false;  // SetDrawHidden
 uint32_t g_draw_at = 0;
 gpu::interp::TagTable g_tag_turns;
 
@@ -616,6 +617,14 @@ DrawTag SetDrawTag(DrawTag tag) {
     std::lock_guard<std::recursive_mutex> lock(g_lock);
     Walk(Dev(kDevPush));  // the commands pushed so far are the tag's before
     return std::exchange(g_tag, tag);
+}
+
+bool SetDrawHidden(bool hidden) {
+    if (hidden == g_hidden) return hidden;
+    if (Dev(kDevPush) == g_walk) return std::exchange(g_hidden, hidden);
+    std::lock_guard<std::recursive_mutex> lock(g_lock);
+    Walk(Dev(kDevPush));  // the commands pushed so far are drawn as the setting before has them
+    return std::exchange(g_hidden, hidden);
 }
 
 }  // namespace d3d
@@ -1500,7 +1509,7 @@ void NoteStencil(const char* how, uint32_t v, uint32_t from) {
 }
 
 void BackendDraw(uint32_t prim, uint32_t start, uint32_t count, const uint8_t* indices) {
-    if (!g_backend) return;
+    if (!g_backend || g_hidden) return;
     LodNote(prim, count);
     gpu::interp::g_draw_tag = TagOfDraw();
     struct Untag {

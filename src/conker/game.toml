@@ -510,3 +510,7 @@ call = "ConkerSpriteDraw"
 [[hook]]
 at = 0x359DDA
 call = "ConkerSpriteDraw"
+
+[[hook]]
+at = 0x2EE52F   # a hit on a character takes its damage off: Conker's 10x with the option (gameplay.cpp)
+call = "ConkerHitDamage"

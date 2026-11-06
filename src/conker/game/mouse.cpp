@@ -27,6 +27,7 @@
 //
 // On the headless harness there is no window and no mouse, so everything but the option globals compiles out.
 #include "common/mouse.h"
+#include "common/fpv.h"
 
 #include "cpu/x86_ops.h"
 
@@ -214,6 +215,8 @@ void Release() { app::HoldMouse(false); }
 
 void InMenu() { g_menu_us.store(Now(), std::memory_order_relaxed); }
 
+bool MenuShown() { return Now() - g_menu_us.load(std::memory_order_relaxed) < kMenuUs; }
+
 void Refresh(void* window) {
 #ifdef _WIN32
     HWND hwnd = static_cast<HWND>(window);
@@ -321,7 +324,7 @@ constexpr int kLevels[] = {1, 4, 8, 12, 16, 20, 22, 24, 26, 28, 30, 32, 36, 40, 
 constexpr int kLevelCount = int(std::size(kLevels));
 constexpr int64_t kHoldUs = 1000000, kGapUs = 700000;
 
-bool Readable(uint32_t va, uint32_t size) { return va && mem::IsCommitted(va) && mem::IsCommitted(va + size - 1); }
+bool Readable(uint32_t va, uint32_t size) { return mem::IsRangeCommitted(va, size); }
 
 uint32_t R32(uint32_t va) {
     uint32_t v;
@@ -724,6 +727,8 @@ void Message(void*, uint32_t, uintptr_t, intptr_t) {}
 
 void InMenu() {}
 
+bool MenuShown() { return false; }
+
 void Refresh(void*) {}
 
 void Pad(int, input::Pad&) {}
@@ -747,8 +752,14 @@ X86_FUNC(sub_002F99A0) {
     const uint32_t actions = ctx.eax, turn = ctx.ecx;
     uint32_t ret;
     std::memcpy(&ret, base + ctx.esp, 4);
+    float limits[2];
+    const bool first_person = fpv::BeginTurn(actions, turn, limits);  // the stick's whole pitch turn in first person
     __imp__sub_002F99A0(ctx, base);
+    if (first_person) fpv::EndTurn(turn, limits);
+    fpv::BoostTurn(actions, turn);  // first person's stick speed, before the mouse is added
+    const float stick_pitch = fpv::PitchTurn(turn);
     mouse::Turn(actions, turn, ret);
+    fpv::NotePitch(actions, turn, stick_pitch);  // first person looks up and down by it, past the follow camera's limits
 }
 
 // 0x3F4E0 (the player in eax): the player's camera in a vehicle, among much else; the tank's aim (mouse::TankAim)

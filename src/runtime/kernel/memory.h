@@ -29,6 +29,10 @@ uint8_t* Base();
 bool Commit(uint32_t va, uint32_t size);
 void Decommit(uint32_t va, uint32_t size);
 bool IsCommitted(uint32_t va);
+// [va, va + size) committed (its first and last byte), va not 0
+inline bool IsRangeCommitted(uint32_t va, uint32_t size) {
+    return va && IsCommitted(va) && IsCommitted(va + size - 1);
+}
 
 // user virtual space, NTSTATUS results
 uint32_t AllocateVirtual(uint32_t& base, uint32_t& size, uint32_t type, uint32_t protect);

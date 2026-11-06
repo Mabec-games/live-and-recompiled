@@ -38,7 +38,9 @@
 #endif
 
 #include "common/camscan.h"
+#include "common/fpv.h"
 #include "common/gamepad.h"
+#include "common/gameplay.h"
 #include "common/keyboard.h"
 #include "common/menus.h"
 #include "common/mouse.h"
@@ -352,6 +354,9 @@ std::string PlayerTable(int p) { return "player" + std::to_string(p + 1); }
 
 void Load(const void* table) {
     const toml::table& t = *static_cast<const toml::table*>(table);
+    // the Overpowered Frying Pan option became the 10x damage one: a file from before keeps its choice
+    if (!t.contains("bat_10x_damage"))
+        if (std::optional<bool> pan = t["overpowered_pan"].value<bool>()) gameplay::g_bat_10x_damage = *pan;
     for (int p = 0; p < input::kPorts; p++) {
         const toml::table* player = t[PlayerTable(p)].as_table();
         const bool keys = player && (*player)["keys"].as_table();
@@ -454,6 +459,7 @@ void Pad(int port, input::Pad& pad) {
     menus::Pad(port, pad);  // the mouse points and clicks on the game's menu lists and the pub's pictures
     gamepad::Pad(port, pad);  // A on the frontend's Options opens the settings menu, the mouse's too
     mouse::Pad(port, pad);  // the mouse, while it looks, takes the right stick
+    fpv::Pad(port, pad);  // LT / Q toggles first-person view
     if (port != 0) return;
     camscan::Tick(pad);  // XBE_CAMSCAN: the camera angle search watches the stick the game gets
     stickwatch::Tick();  // XBE_STICK_WATCH: F11 finds the code that reads the right stick

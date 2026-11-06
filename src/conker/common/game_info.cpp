@@ -3,8 +3,10 @@
 #include "common/characters.h"
 #include "common/cutscenes.h"
 #include "common/display.h"
+#include "common/fpv.h"
 #include "common/fur.h"
 #include "common/gamepad.h"
+#include "common/gameplay.h"
 #include "common/grass.h"
 #include "common/keyboard.h"
 #include "common/lighting.h"
@@ -56,6 +58,9 @@ const app::GameInfo app::kGame = {
                 {"dynamic_water", &water::g_dynamic, nullptr},  // flowing, rippling water (src/conker/common/water.cpp)
                 {"per_pixel_lighting", &lighting::g_per_pixel, nullptr},  // lit per pixel (src/conker/common/lighting.cpp)
                 {"floor_depth", &reflection::g_floor_depth, nullptr},  // floors over reflections blur by their own depth (reflection.cpp)
+                {"bat_10x_damage", &gameplay::g_bat_10x_damage, nullptr},  // 10x damage for all of Conker's attacks (gameplay.cpp)
+                {"fpv_toggle", &fpv::g_allow_toggle, nullptr},  // first-person POV mode toggle with LT / Q (fpv.cpp)
+                {"fpv_look_speed", nullptr, &fpv::g_look_speed},  // first person's right stick turn, percent (fpv.cpp)
                 {"vignette", &vignette::g_on, nullptr}},  // the game's darkened screen edges (src/conker/game/vignette.cpp)
     // the [playerN] tables: each player's keyboard bindings, mouse look, invert aim and vibration
     // (src/conker/game/keyboard.cpp, mouse.cpp, hooks.cpp)

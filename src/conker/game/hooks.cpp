@@ -124,6 +124,11 @@ int64_t SteadyNs() {
 }
 }  // namespace
 
+bool cutscenes::Playing() {
+    const int64_t seen = g_cutscene_seen.load(std::memory_order_relaxed);
+    return seen && SteadyNs() - seen <= 250'000'000;
+}
+
 float cutscenes::AudioGain() {
     const uint32_t db = std::min<uint32_t>(g_volume_db, 12);
     const int64_t seen = g_cutscene_seen.load(std::memory_order_relaxed);

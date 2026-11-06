@@ -28,8 +28,10 @@
 #include "common/characters.h"
 #include "common/cutscenes.h"
 #include "common/display.h"
+#include "common/fpv.h"
 #include "common/fur.h"
 #include "common/gamepad.h"
+#include "common/gameplay.h"
 #include "common/grass.h"
 #include "common/keyboard.h"
 #include "common/lighting.h"
@@ -1050,6 +1052,11 @@ void Draw(double fps) {
                 Hint("Press LT to skip any cutscene, even ones you haven't seen.", true);
                 ImGui::Checkbox("Rope physics", &rope::g_physics);
                 Hint("Ropes swing realistically when Conker hangs on them.", true);
+                ImGui::Checkbox("10x damage (all of Conker's attacks)", &gameplay::g_bat_10x_damage);
+                Hint("Everything Conker hits takes 10x damage: the baseball bat, his other melee hits, and his guns and explosives. Story mode only.", true);
+                ImGui::Checkbox("First-Person POV Mode", &fpv::g_allow_toggle);
+                Hint("Press LT or Q to toggle between 3rd-person and a playable First-Person POV with full movement, jumping, and attacks. Story mode only: multiplayer and the pub menus keep the normal camera and LT.", true);
+                Slider("First-person look speed %", &fpv::g_look_speed, 50, 200, 120);
                 end_tab();
             }
 

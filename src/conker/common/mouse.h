@@ -31,6 +31,8 @@ void Refresh(void* hwnd);
 // one of the game's menus ran this frame (single player's pause menu, a menu list), so the cursor goes free while
 // they run; game thread
 void InMenu();
+// one of them ran within the last 0.2 s (InMenu); any thread
+bool MenuShown();
 
 // from keyboard::Pad: the last frame's motion of the port's mice as right stick, while the cursor is held
 void Pad(int port, input::Pad& pad);
