@@ -4346,7 +4346,10 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
     if (zps && zps->depth_alpha > 0 && k.blend && k.zen && k.zwrite &&
         (zps->top < 0 || s.vsc[size_t(zps->top)][0] > 0))
         zalpha = zps->depth_alpha;
-    else if (k.blend && k.zen && !k.zwrite && (surface = SurfaceDepth(s, start, count, indices)))
+    // never a screen space draw: the pause screen's sprites (x, y in pixels, z in depth units, so flat to the test)
+    // took a depth pass and hid the counts drawn after them (issue #23)
+    else if (k.blend && k.zen && !k.zwrite && !ScreenSpaceDraw(s, a) &&
+             (surface = SurfaceDepth(s, start, count, indices)))
         zalpha = g_surface_depth.alpha;
     if (zalpha > 0) {
         PixelKey zpk = pk;
