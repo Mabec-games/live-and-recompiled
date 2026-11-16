@@ -12,6 +12,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <unordered_map>
 
 #include "xdk/hle.h"
 #include "cpu/x86_ops.h"
@@ -423,4 +424,84 @@ bool ConkerScriptTimer(X86Context& ctx, uint8_t* base) {
     const uint32_t frames = now / 2 - (now - ticks) / 2;  // console frames this frame's ticks end
     left = uint8_t(left > frames ? left - frames : 0);
     return true;
+}
+
+// A cutscene part that starts part way into its timeline (start [0x7655F4] above 0) fires its opening events, the
+// ones timed 0..start (the set, who stands where, the camera, the ambience), together the first time its clock leaves
+// the start: the clock step 0x501F0 (esi the slot) then makes last [0x76F0F0+s*4] -1, and the dispatcher 0x56050
+// (mode, slot on the stack) fires everything up to now [0x76F0F8+s*4], but only while the flag [0x76F0D8+s] is 0,
+// and each mode 0 run sets it (0x56868), even one whose window last..now was empty. At 30 FPS a frame moves the clock
+// two ticks, so it has always left the start by the dispatcher's first run. At 60 now = (int)(60 * seconds) can land
+// on the start for a frame (100.99998 -> 100), the empty run sets the flag and the opening is never fired: the
+// throne room story scene's second part (the Professor's lab, start 100, before the Panther King's table) drew
+// black under its subtitles and music (issue #21). Here the dispatcher notes a flag-setting run on an empty window,
+// and the next clock step, while the clock still sits on the start, clears the flag again, so the game's own catch-up
+// fires when the clock moves. A first run that did fire the opening is never owed, so nothing fires twice.
+// XBE_CUTSCENE_START_FIX=0 is the original. Found by cdetv (conker-live-recompiled, MIT, issue #16).
+namespace {
+bool g_cut_owed[2];
+bool CutsceneStartFix() {
+    static const bool on = [] {
+        const char* e = std::getenv("XBE_CUTSCENE_START_FIX");
+        return !(e && e[0] == '0');
+    }();
+    return on;
+}
+}  // namespace
+
+X86_EXTERN_FUNC(__imp__sub_00056050);
+X86_FUNC(sub_00056050) {
+    using kernel::R32;
+    const uint32_t mode = R32(ctx.esp + 4), s = R32(ctx.esp + 8);
+    if (mode == 0 && s < 2 && CutsceneStartFix() && !base[0x76F0D8 + s])
+        g_cut_owed[s] = R32(0x76F0F0 + s * 4) == R32(0x76F0F8 + s * 4);
+    __imp__sub_00056050(ctx, base);
+}
+
+X86_EXTERN_FUNC(__imp__sub_000501F0);
+X86_FUNC(sub_000501F0) {
+    using kernel::R32;
+    const uint32_t s = ctx.esi;
+    if (s < 2 && g_cut_owed[s] && CutsceneStartFix()) {
+        const uint32_t start = kernel::R16(0x7655F4);
+        if (R32(0x76F0F8 + s * 4) != start) {
+            g_cut_owed[s] = false;  // left the start: the catch-up ran
+        } else if (base[0x76F0E0 + s] == 1 && base[0x76F0D8 + s] && R32(0x76F0F0 + s * 4) == start) {
+            base[0x76F0D8 + s] = 0;
+            LOGR("cutscene: slot %u still on its start %u, its opening kept for the catch-up", s, start);
+        }
+    }
+    __imp__sub_000501F0(ctx, base);
+}
+
+// 0x2D9FD0 (edi the character), once a frame from the character update 0x2D6570: eases the ground hazard
+// [character+0x1D4] (int16) toward the ground's target [character+0x1D6] by a twelfth of the gap and one more, and
+// 0x2E34D0 right after kills the character at -94 or lower. On Barn Boys' thatched roof the target dips far below
+// that and climbs back: eased 30 times a second the value never gets there, eased 60 times it does, and Conker died
+// walking on the roof at 60. Above 30 it eases once a console frame (each two ticks, display::Ticks), as at 30; a
+// second call for a character in the same frame (frame count [0x7F9F60] unchanged) passes, as the original eases
+// twice then. XBE_HAZARD_FIX=0 is the original. Lead from cdetv (conker-live-recompiled) and giacomozama.
+X86_EXTERN_FUNC(__imp__sub_002D9FD0);
+X86_FUNC(sub_002D9FD0) {
+    static const bool on = [] {
+        const char* e = std::getenv("XBE_HAZARD_FIX");
+        return !(e && e[0] == '0');
+    }();
+    if (!on || display::GameRate() <= 30) {
+        __imp__sub_002D9FD0(ctx, base);
+        return;
+    }
+    struct Seen {
+        uint32_t frame, console_frame;
+    };
+    static std::unordered_map<uint32_t, Seen> seen;
+    if (seen.size() > 4096) seen.clear();  // characters come and go with levels
+    const uint32_t frame = kernel::R32(0x7F9F60), console_frame = display::Ticks() / 2;
+    auto [it, fresh] = seen.try_emplace(ctx.edi, Seen{frame, console_frame});
+    bool ease = fresh || it->second.frame == frame || it->second.console_frame != console_frame;
+    it->second = {frame, ease ? console_frame : it->second.console_frame};
+    if (ease)
+        __imp__sub_002D9FD0(ctx, base);
+    else
+        kernel::Return(ctx, ctx.eax, 0);  // ret, nothing eased this frame
 }

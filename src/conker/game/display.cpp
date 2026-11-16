@@ -71,7 +71,8 @@ uint32_t Shown() {
 
 // the game's: 30 (the console's) or 60, past which the runtime draws the frames between. Console timing keeps the
 // game at 30 whatever is shown, the frames past 30 all drawn between: the console's own steps, without the 60 FPS
-// patch's quirks (Conker dying on the barn roof in Barn Boys at 60), for controls that answer at 30
+// patch's quirks (the barn roof's ground hazard is eased at 30 at 60 too: 0x2D9FD0 in hooks.cpp), for controls that
+// answer at 30
 uint32_t Rate() { return g_console_timing ? 30 : std::min(Shown(), kGameMost); }
 
 }  // namespace
