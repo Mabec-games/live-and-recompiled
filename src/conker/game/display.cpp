@@ -20,6 +20,7 @@
 // ([camera+0x264]). The widescreen patch multiplied the aspect by 4/3 there for a 16:9 TV; scaling it by the display
 // over 4:3 widens the view to any shape with the same vertical view (Hor+). The frame stays the console's 640x480 and
 // the window shows it at the display's shape, so 2D (the HUD, menus) stretches across it as with the XBE patch.
+#include "kernel/gil.h"
 #include "common/display.h"
 
 #include <algorithm>
@@ -132,6 +133,7 @@ X86_FUNC(sub_002A7B60) {
         auto now = clock::now();
         next += period;
         if (next < now - period) next = now;
+        gil::Unlocked other_threads_run;
         while (clock::now() + std::chrono::milliseconds(2) < next) std::this_thread::sleep_for(std::chrono::milliseconds(1));
         while (clock::now() < next) std::this_thread::yield();
     } else if (owned) {

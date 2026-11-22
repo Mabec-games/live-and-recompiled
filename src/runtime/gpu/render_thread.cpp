@@ -34,6 +34,7 @@
 #include "app/app.h"
 #include "core/diag.h"
 #include "core/log.h"
+#include "kernel/gil.h"
 #include "gpu/backend.h"
 #include "gpu/draw.h"
 #include "gpu/interp.h"
@@ -538,6 +539,7 @@ private:
         if (id >= cur_->id) id = Submit();
         auto t = PerfClock::now();
         {
+            gil::Unlocked other_threads_run;
             std::unique_lock lock(m_);
             done_cv_.wait(lock, [&] { return done_.load() >= id; });
         }

@@ -10,6 +10,7 @@
 #include <unordered_set>
 #include <utility>
 
+#include "kernel/gil.h"
 #include "app/app.h"
 #include "core/diag.h"
 #include "gpu/backend.h"
@@ -814,6 +815,7 @@ HLE_STDCALL(D3D_MakeRequestedSpace, 2) {
 }
 
 HLE_STDCALL(D3DDevice_BlockUntilVerticalBlank, 0) {
+    gil::Unlocked other_threads_run;
     std::this_thread::sleep_for(std::chrono::milliseconds(16));
     return 0;
 }
@@ -953,6 +955,7 @@ HLE_STDCALL(D3DDevice_Swap, 1) {
     // a host menu is up (kernel::Hold): the title waits here, its clocks stopped, its last picture shown again under
     // the menu
     while (kernel::Held() && g_backend) {
+        gil::Unlocked other_threads_run;
         g_backend->Redisplay();
         app::Pace(1);
         std::this_thread::sleep_for(std::chrono::milliseconds(1));  // no cap and no vsync: not a core spun on a menu

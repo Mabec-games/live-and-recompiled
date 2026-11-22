@@ -17,6 +17,7 @@
 #include <imgui.h>
 #include <backends/imgui_impl_sdl3.h>
 
+#include "kernel/gil.h"
 #include "app/app.h"
 #include "core/input.h"
 #include "core/log.h"
@@ -505,6 +506,7 @@ void Pace(uint32_t vblanks) {
     auto period = std::chrono::nanoseconds(1000000000ull / cap);
     next += period;
     if (next < now - period) next = now;
+    gil::Unlocked other_threads_run;  // the frame's wait: guest threads behind the presenting one go on
     while (clock::now() + std::chrono::milliseconds(2) < next) std::this_thread::sleep_for(std::chrono::milliseconds(1));
     while (clock::now() < next) std::this_thread::yield();
 }

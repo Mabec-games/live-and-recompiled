@@ -10,6 +10,7 @@
 #include "core/log.h"
 #include "cpu/x86_ops.h"
 #include "kernel/kernel.h"
+#include "kernel/gil.h"
 
 #ifdef _WIN32
 #include <intrin.h>
@@ -184,6 +185,7 @@ void x86_resume(X86Context& ctx, uint8_t* base, const X86Resume& r) {
 void x86_kernel(X86Context& ctx, uint8_t* base, uint32_t ordinal) {
     if (g_trail_on) Note(ctx, 'K', ordinal, kernel::R32(ctx.esp));
     if (ordinal < 400 && g_exports[ordinal].fn) {
+        gil::Unlocked other_threads_run;  // a kernel call is where Xbox threads switch
         g_exports[ordinal].fn(ctx, base);
         return;
     }
@@ -229,7 +231,10 @@ uint32_t CallGuest(X86Context& ctx, uint32_t fn, const uint32_t* args, size_t co
     ctx.esp -= 4;
     W32(ctx.esp, 0xFFFFFFF0u);  // never used as a target, calls return through the host stack
     if (g_trail_on) Note(ctx, 'H', fn, 0);
-    x86_icall(ctx, g_base, fn);
+    {
+        gil::Hold guest;  // host code into guest code: thread entries, DPCs, APCs, callbacks, the hooks' calls
+        x86_icall(ctx, g_base, fn);
+    }
     uint32_t result = ctx.eax;
     ctx.eax = saved.eax;
     ctx.ecx = saved.ecx;
