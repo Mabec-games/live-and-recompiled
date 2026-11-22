@@ -6,6 +6,7 @@
 #include <type_traits>
 
 #include "x86_context.h"
+#include "x86_atomic.h"
 
 typedef uint16_t __attribute__((aligned(1), may_alias)) x86_u16u;
 typedef uint32_t __attribute__((aligned(1), may_alias)) x86_u32u;

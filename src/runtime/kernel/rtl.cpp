@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <mutex>
 
+#include "cpu/x86_atomic.h"
 #include "kernel/exports.h"
 
 namespace kernel {
@@ -285,15 +286,15 @@ KERNEL_EXPORT(319, RtlWalkFrameChain, 3) { return 0; }
 
 // interlocked, fastcall
 
-KERNEL_FASTCALL(53, InterlockedIncrement) { return uint32_t(__atomic_add_fetch(&G<int32_t>(ctx.ecx), 1, __ATOMIC_SEQ_CST)); }
-KERNEL_FASTCALL(52, InterlockedDecrement) { return uint32_t(__atomic_sub_fetch(&G<int32_t>(ctx.ecx), 1, __ATOMIC_SEQ_CST)); }
-KERNEL_FASTCALL(54, InterlockedExchange) { return __atomic_exchange_n(&G<uint32_t>(ctx.ecx), ctx.edx, __ATOMIC_SEQ_CST); }
-KERNEL_FASTCALL(55, InterlockedExchangeAdd) { return __atomic_fetch_add(&G<uint32_t>(ctx.ecx), ctx.edx, __ATOMIC_SEQ_CST); }
+KERNEL_FASTCALL(53, InterlockedIncrement) { return uint32_t(x86_atomic_add_fetch(&G<int32_t>(ctx.ecx), 1, __ATOMIC_SEQ_CST)); }
+KERNEL_FASTCALL(52, InterlockedDecrement) { return uint32_t(x86_atomic_sub_fetch(&G<int32_t>(ctx.ecx), 1, __ATOMIC_SEQ_CST)); }
+KERNEL_FASTCALL(54, InterlockedExchange) { return x86_atomic_xchg(&G<uint32_t>(ctx.ecx), ctx.edx, __ATOMIC_SEQ_CST); }
+KERNEL_FASTCALL(55, InterlockedExchangeAdd) { return x86_atomic_fetch_add(&G<uint32_t>(ctx.ecx), ctx.edx, __ATOMIC_SEQ_CST); }
 
 // destination in ecx, exchange in edx, comparand on the stack
 static void InterlockedCompareExchangeEntry(X86Context& ctx, uint8_t*) {
     uint32_t expected = R32(ctx.esp + 4);
-    __atomic_compare_exchange_n(&G<uint32_t>(ctx.ecx), &expected, ctx.edx, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+    x86_atomic_cas(&G<uint32_t>(ctx.ecx), &expected, ctx.edx, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
     Return(ctx, expected, 1);
 }
 static const bool kreg_InterlockedCompareExchange =
