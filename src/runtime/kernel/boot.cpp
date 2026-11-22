@@ -203,10 +203,7 @@ void Relaunch(const char* exe) {
     }
     std::_Exit(0);
 #else
-    char self[4096] = {};
-    ssize_t n = readlink("/proc/self/exe", self, sizeof(self) - 1);
-    std::string path = std::string(self, n > 0 ? size_t(n) : 0);
-    path = path.substr(0, path.find_last_of('/') + 1) + exe;
+    std::string path = (app::ExeDir() / exe).string();  // the relaunched image beside this one (ExeDir knows macOS too)
     // as on Windows: the instance, system link port and join address kept, no boot splash again, the ports given back for the new
     // process to bind
     xnet::CloseSockets();

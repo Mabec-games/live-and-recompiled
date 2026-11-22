@@ -4,6 +4,11 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <mach-o/dyld.h>  // _NSGetExecutablePath
+#endif
+#include <climits>
+#include <cstdlib>
 
 #include <algorithm>
 #include <array>
@@ -313,8 +318,17 @@ bool Handle(const SDL_Event& e) {
 std::filesystem::path ExeDir() {
     static const std::filesystem::path dir = [] {
         char p[PATH_MAX] = {};
+#ifdef __APPLE__
+        // no /proc on macOS: without this the folder was the working directory, so a Game started from anywhere but
+        // its own folder found neither assets/ nor portable.txt
+        uint32_t size = sizeof(p);
+        char real[PATH_MAX] = {};
+        if (_NSGetExecutablePath(p, &size) == 0 && realpath(p, real)) return std::filesystem::path(real).parent_path();
+        return std::filesystem::current_path();
+#else
         ssize_t n = readlink("/proc/self/exe", p, sizeof(p) - 1);
         return n > 0 ? std::filesystem::path(std::string(p, size_t(n))).parent_path() : std::filesystem::current_path();
+#endif
     }();
     return dir;
 }
