@@ -431,6 +431,7 @@ function(add_xbe_player_kit target title)
         COMMAND ${CMAKE_COMMAND} -E copy ${XBE_GAME_SRC}/${config} ${kit}/config/
         COMMAND ${CMAKE_COMMAND} -E copy_directory ${XBE_XDK_DIR} ${kit}/xdk
         COMMAND ${CMAKE_COMMAND} -E copy ${XBE_ROOT_DIR}/src/runtime/cpu/x86_ops.h ${XBE_ROOT_DIR}/src/runtime/cpu/x86_context.h
+            ${XBE_ROOT_DIR}/src/runtime/cpu/x86_atomic.h
             ${kit}/include/cpu/
         COMMAND ${CMAKE_COMMAND} -E copy ${gen}/image_symbols.h ${kit}/include/
         COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:${target}_host> $<TARGET_FILE:SDL3::SDL3-static> ${kit}/${lib}/

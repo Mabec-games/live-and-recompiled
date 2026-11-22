@@ -68,8 +68,8 @@ bool CodeGen::EmitInteger(uint32_t va, const ZydisDecodedInstruction& in, const 
     // read modify write through an atomic compare exchange loop when locked
     auto rmw = [&](const std::string& pre, const std::string& expr, const std::string& flags) {
         if (lock) {
-            emit(F("%s* p = X86_PTR(%s, ea); %s a = __atomic_load_n(p, __ATOMIC_SEQ_CST); %s %s r; "
-                   "do { r = (%s)(%s); } while (!__atomic_compare_exchange_n(p, &a, r, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)); %s",
+            emit(F("%s* p = X86_PTR(%s, ea); %s a = x86_atomic_load(p, __ATOMIC_SEQ_CST); %s %s r; "
+                   "do { r = (%s)(%s); } while (!x86_atomic_cas(p, &a, r, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)); %s",
                    T.c_str(), T.c_str(), T.c_str(), pre.c_str(), T.c_str(), T.c_str(), expr.c_str(), flags.c_str()));
         } else {
             emit(F("%s a = %s; %s %s r = (%s)(%s); %s %s", T.c_str(), rd(0).c_str(), pre.c_str(), T.c_str(), T.c_str(),
@@ -120,7 +120,7 @@ bool CodeGen::EmitInteger(uint32_t va, const ZydisDecodedInstruction& in, const 
         case ZYDIS_MNEMONIC_XCHG:
             if (mem) {
                 int r = mi == 0 ? 1 : 0;
-                emit(F("%s old = __atomic_exchange_n(X86_PTR(%s, ea), (%s)(%s), __ATOMIC_SEQ_CST); %s", T.c_str(), T.c_str(),
+                emit(F("%s old = x86_atomic_xchg(X86_PTR(%s, ea), (%s)(%s), __ATOMIC_SEQ_CST); %s", T.c_str(), T.c_str(),
                        T.c_str(), Read(ops[r], ea).c_str(), RegWrite(ops[r].reg.value, "old").c_str()));
             } else {
                 emit(F("%s t = %s; %s %s", T.c_str(), rd(0).c_str(), wr(0, Read(ops[1], ea)).c_str(), wr(1, "t").c_str()));
@@ -315,7 +315,7 @@ bool CodeGen::EmitInteger(uint32_t va, const ZydisDecodedInstruction& in, const 
 
         case ZYDIS_MNEMONIC_XADD:
             if (lock)
-                emit(F("%s b = %s; %s a = __atomic_fetch_add(X86_PTR(%s, ea), b, __ATOMIC_SEQ_CST); %s r = (%s)(a + b); %s "
+                emit(F("%s b = %s; %s a = x86_atomic_fetch_add(X86_PTR(%s, ea), b, __ATOMIC_SEQ_CST); %s r = (%s)(a + b); %s "
                        "cf = r < a; of = (uint32_t)(((a ^ r) & (b ^ r)) >> %u) & 1; %s",
                        T.c_str(), rd(1).c_str(), T.c_str(), T.c_str(), T.c_str(), T.c_str(), wr(1, "a").c_str(), W - 1,
                        Szp(W).c_str()));
@@ -330,7 +330,7 @@ bool CodeGen::EmitInteger(uint32_t va, const ZydisDecodedInstruction& in, const 
             std::string flags = F("%s r = (%s)(x - a); cf = x < a; of = (uint32_t)(((x ^ a) & (x ^ r)) >> %u) & 1; %s",
                                   T.c_str(), T.c_str(), W - 1, Szp(W).c_str());
             if (mem)
-                emit(F("%s x = %s; %s a = x; bool ok = __atomic_compare_exchange_n(X86_PTR(%s, ea), &a, (%s)(%s), false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); "
+                emit(F("%s x = %s; %s a = x; bool ok = x86_atomic_cas(X86_PTR(%s, ea), &a, (%s)(%s), false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); "
                        "if (!ok) { %s } %s",
                        T.c_str(), acc.c_str(), T.c_str(), T.c_str(), T.c_str(), Read(ops[1], ea).c_str(),
                        RegWrite(accr, "a").c_str(), flags.c_str()));
@@ -341,7 +341,7 @@ bool CodeGen::EmitInteger(uint32_t va, const ZydisDecodedInstruction& in, const 
         }
         case ZYDIS_MNEMONIC_CMPXCHG8B:
             emit("uint64_t x = ((uint64_t)ctx.edx << 32) | ctx.eax; uint64_t n = ((uint64_t)ctx.ecx << 32) | ctx.ebx; "
-                 "bool ok = __atomic_compare_exchange_n(X86_PTR(uint64_t, ea), &x, n, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); "
+                 "bool ok = x86_atomic_cas(X86_PTR(uint64_t, ea), &x, n, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); "
                  "zf = ok; if (!ok) { ctx.eax = (uint32_t)x; ctx.edx = (uint32_t)(x >> 32); }");
             return true;
 
@@ -371,9 +371,9 @@ bool CodeGen::EmitInteger(uint32_t va, const ZydisDecodedInstruction& in, const 
             if (m == ZYDIS_MNEMONIC_BT) {
                 s += F("cf = (%s >> n) & 1;", Mem(W, "a2").c_str());
             } else if (in.attributes & ZYDIS_ATTRIB_HAS_LOCK) {
-                std::string ats = m == ZYDIS_MNEMONIC_BTS   ? std::string("__atomic_fetch_or(p, bit, __ATOMIC_SEQ_CST)")
-                                  : m == ZYDIS_MNEMONIC_BTR ? F("__atomic_fetch_and(p, (%s)~bit, __ATOMIC_SEQ_CST)", T.c_str())
-                                                            : std::string("__atomic_fetch_xor(p, bit, __ATOMIC_SEQ_CST)");
+                std::string ats = m == ZYDIS_MNEMONIC_BTS   ? std::string("x86_atomic_fetch_or(p, bit, __ATOMIC_SEQ_CST)")
+                                  : m == ZYDIS_MNEMONIC_BTR ? F("x86_atomic_fetch_and(p, (%s)~bit, __ATOMIC_SEQ_CST)", T.c_str())
+                                                            : std::string("x86_atomic_fetch_xor(p, bit, __ATOMIC_SEQ_CST)");
                 s += F("%s* p = X86_PTR(%s, a2); %s a = %s; cf = (a >> n) & 1;", T.c_str(), T.c_str(), T.c_str(), ats.c_str());
             } else {
                 s += F("%s a = %s; cf = (a >> n) & 1; %s = (%s)(%s);", T.c_str(), Mem(W, "a2").c_str(), Mem(W, "a2").c_str(),
