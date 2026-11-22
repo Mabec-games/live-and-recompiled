@@ -14,7 +14,12 @@ namespace ui {
 // picture, the pause screen's Y, a match's pause menu) show a notice that the settings are in the launcher (the Online
 // Play menu's extra one is not added). In a level Esc is only the game's Start. In the frontend's menu Esc, Back and
 // Backspace ask to quit (Yes / No) and a pad's Start is the game's; the window's close button quits at once
+#ifdef __APPLE__
+// macOS has no launcher yet (Conker: Recomped & Reloaded's is Windows and Linux): the game's own menu (F1) keeps them
+inline constexpr bool kLauncherSettings = false;
+#else
 inline constexpr bool kLauncherSettings = true;
+#endif
 
 // the GameInfo::ui hook: drawn inside the ImGui frame on the render thread, with app::UiLock held
 void Draw(double fps);
