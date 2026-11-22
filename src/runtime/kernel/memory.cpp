@@ -24,10 +24,16 @@ namespace mem {
 static uint8_t* g_base = nullptr;
 
 #ifndef _WIN32
-// the host's pages are bigger than the guest's 4 KB (16 KB on Apple Silicon)
-static bool BigPages() {
-    static const bool big = sysconf(_SC_PAGESIZE) > long(kPage);
-    return big;
+// the host page: 4 KB on x86-64 Linux, 16 KB on Apple Silicon. Guest bookkeeping stays at the Xbox's 4 KB, but
+// mprotect and mmap only take host-page aligned ranges, so a commit rounds out to host pages (a little more memory
+// becomes accessible than asked, which guest code can't tell) and a decommit releases a host page only once every
+// guest page in it is free. Uncommitted guest memory stays inaccessible, as on the console.
+static uint64_t HostPage() {
+    static const uint64_t page = [] {
+        long v = sysconf(_SC_PAGESIZE);
+        return v > long(kPage) ? uint64_t(v) : uint64_t(kPage);
+    }();
+    return page;
 }
 #endif
 static std::recursive_mutex g_lock;
@@ -72,10 +78,7 @@ bool Init() {
     // the XACT audio engine polls MCPX APU registers the same way
     if (g_base) VirtualAlloc(g_base + kApuRegisterBase, kApuRegisterSize, MEM_COMMIT, PAGE_READWRITE);
 #else
-    // host pages over 4 KB (Apple Silicon's 16 KB) can't be committed one guest page at a time: the address space is
-    // readable and writable from the start (backed only as touched), Commit and Decommit keep the map (BigPages)
-    void* p = mmap(reinterpret_cast<void*>(0x100000000ull), size, BigPages() ? PROT_READ | PROT_WRITE : PROT_NONE,
-                   MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+    void* p = mmap(reinterpret_cast<void*>(0x100000000ull), size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
     g_base = p == MAP_FAILED ? nullptr : static_cast<uint8_t*>(p);
 #ifdef __APPLE__
     // no memfd on macOS: a shared memory object, its name gone at once
@@ -123,9 +126,13 @@ bool Commit(uint32_t va, uint32_t size) {
         return false;
     }
 #else
-    if (!BigPages() && mprotect(g_base + first, size_t(end - first), PROT_READ | PROT_WRITE)) {
-        LOGE("memory: commit %08X+%X failed", first, uint32_t(end - first));
-        return false;
+    {
+        const uint64_t hp = HostPage();
+        const uint64_t hfirst = first & ~(hp - 1), hend = (end + hp - 1) & ~(hp - 1);
+        if (mprotect(g_base + hfirst, size_t(hend - hfirst), PROT_READ | PROT_WRITE)) {
+            LOGE("memory: commit %08X+%X failed", first, uint32_t(end - first));
+            return false;
+        }
     }
 #endif
     for (uint64_t p = first; p < end; p += kPage) g_committed[size_t(p >> 12)] = 1;
@@ -139,16 +146,25 @@ void Decommit(uint32_t va, uint32_t size) {
     std::lock_guard<std::recursive_mutex> lock(g_lock);
 #ifdef _WIN32
     VirtualFree(g_base + first, size_t(end - first), MEM_DECOMMIT);
+    for (uint64_t p = first; p < end; p += kPage) g_committed[size_t(p >> 12)] = 0;
 #else
-    if (BigPages()) {
-        // a host page may hold guest pages still committed: zeroed, as a commit would find them, and left mapped
-        std::memset(g_base + first, 0, size_t(end - first));
-    } else {
-        madvise(g_base + first, size_t(end - first), MADV_DONTNEED);
-        mprotect(g_base + first, size_t(end - first), PROT_NONE);
+    for (uint64_t p = first; p < end; p += kPage) g_committed[size_t(p >> 12)] = 0;
+    // only the host pages with no committed guest page left in them
+    const uint64_t hp = HostPage();
+    for (uint64_t h = first & ~(hp - 1); h < end; h += hp) {
+        bool busy = false;
+        for (uint64_t p = h; p < h + hp && !busy; p += kPage) busy = g_committed[size_t(p >> 12)] != 0;
+        if (busy) continue;
+#ifdef __APPLE__
+        // macOS doesn't promise zeroed pages after MADV_DONTNEED; a fresh anonymous mapping over our own reservation
+        // does, which a later commit expects (VirtualAlloc hands back zeroed memory)
+        mmap(g_base + h, size_t(hp), PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED | MAP_NORESERVE, -1, 0);
+#else
+        madvise(g_base + h, size_t(hp), MADV_DONTNEED);
+        mprotect(g_base + h, size_t(hp), PROT_NONE);
+#endif
     }
 #endif
-    for (uint64_t p = first; p < end; p += kPage) g_committed[size_t(p >> 12)] = 0;
 }
 
 bool IsCommitted(uint32_t va) { return InPhysical(va) || g_committed[va >> 12] != 0; }
