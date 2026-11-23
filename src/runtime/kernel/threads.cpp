@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <memory>
 
+#include "kernel/gil.h"
 #include "kernel/kernel.h"
 
 #ifdef _WIN32
@@ -209,6 +210,7 @@ void ExitThread(uint32_t code) {
         Unregister(t);
     }
     t_current.reset();
+    gil::Abandon();  // no unwinding past here gives the lock back
 #ifdef _WIN32
     ::ExitThread(code);
 #else

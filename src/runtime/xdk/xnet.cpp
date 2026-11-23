@@ -35,6 +35,7 @@
 #include <random>
 
 #include "app/app.h"
+#include "kernel/gil.h"
 #include "xdk/hle.h"
 #include "xdk/xnet_wire.h"
 
@@ -999,7 +1000,10 @@ HLE_STDCALL(select, 5) {
     }
     int r = 0;
     if (!total) {
-        if (ptv) Sleep(DWORD(tv.tv_sec * 1000 + tv.tv_usec / 1000));
+        if (ptv) {
+            gil::Unlocked other_threads_run;
+            Sleep(DWORD(tv.tv_sec * 1000 + tv.tv_usec / 1000));
+        }
     } else {
         r = ::select(0, guest[0] ? &host[0] : nullptr, guest[1] ? &host[1] : nullptr, guest[2] ? &host[2] : nullptr, ptv);
         if (r < 0) return Fail(HostError());
@@ -1157,6 +1161,7 @@ HLE_STDCALL(WSAGetOverlappedResult, 5) {
             t_error = WSA_IO_INCOMPLETE;
             return 0;
         }
+        gil::Unlocked other_threads_run;
         Sleep(1);
     }
 }
