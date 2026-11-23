@@ -97,7 +97,7 @@ constexpr const char* kProject = R"(
         float4 cp = float4(dot(v, c[99]), dot(v, c[100]), dot(v, c[101]), dot(v, c[102]));
         float w = magclamp(cp.w);
         float3 sp = cp.xyz * c[58].xyz / w + c[59].xyz;
-        o.pos = float4((sp.x * 2 / surf.x - 1) * w, (1 - sp.y * 2 / surf.y) * w, sp.z * surf.z * w, w);
+        o.pos = float4((sp.x * 2 / surf.x - 1) * w, (1 - sp.y * 2 / surf.y) * w, sp.z * abs(surf.z) * w, w);
         float2 screen = (cp.xy / w * float2(1, -1)) * c[112].y + c[112].y;)";
 constexpr const char* kScreen = R"(
         o.tc1.xy = screen;)";
@@ -196,7 +196,7 @@ constexpr const char* kPoolDs = R"(    {
         float4 cp = float4(dot(v, c[99]), dot(v, c[100]), dot(v, c[101]), dot(v, c[102]));
         float w = magclamp(cp.w);
         float3 sp = cp.xyz * c[58].xyz / w + c[59].xyz;
-        o.pos = float4((sp.x * 2 / surf.x - 1) * w, (1 - sp.y * 2 / surf.y) * w, sp.z * surf.z * w, w);
+        o.pos = float4((sp.x * 2 / surf.x - 1) * w, (1 - sp.y * 2 / surf.y) * w, sp.z * abs(surf.z) * w, w);
     })";
 
 // Per pixel, before the textures are read: the slope of the ripples moves the cell texture and the noise

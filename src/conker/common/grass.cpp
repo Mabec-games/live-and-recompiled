@@ -28,7 +28,7 @@ constexpr const char* kVs = R"(    o.x0 = 0;
             float4 w = float4(base + to * (eased / far), 1);
             float4 pos = float4(dot(w, c[136]), dot(w, c[137]), dot(w, c[138]), dot(w, c[139]));
             float4 p = float4(mac_mul(pos, c[58]).xyz * ilu_rcc(pos.w).x + c[59].xyz, magclamp(pos.w));
-            o.pos = float4(float3(p.x * 2 / surf.x - 1, 1 - p.y * 2 / surf.y, p.z * surf.z) * p.w, p.w);
+            o.pos = float4(float3(p.x * 2 / surf.x - 1, 1 - p.y * 2 / surf.y, p.z * abs(surf.z)) * p.w, p.w);
         }
     })";
 

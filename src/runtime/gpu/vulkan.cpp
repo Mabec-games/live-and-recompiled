@@ -1693,7 +1693,13 @@ bool VulkanBackend::PickDevice() {
         return (fp.optimalTilingFeatures & want) == want;
     };
     VkFormatFeatureFlags target = VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
-    depth_fmt_ = supports(VK_FORMAT_D24_UNORM_S8_UINT, target) ? VK_FORMAT_D24_UNORM_S8_UINT : VK_FORMAT_D32_SFLOAT_S8_UINT;
+    // XBE_DEPTH_FLOAT=1: the float depth format even where D24S8 is there, to see an AMD GPU's depth on another
+    const bool force_float = [] {
+        const char* e = std::getenv("XBE_DEPTH_FLOAT");
+        return e && e[0] == '1';
+    }();
+    depth_fmt_ = !force_float && supports(VK_FORMAT_D24_UNORM_S8_UINT, target) ? VK_FORMAT_D24_UNORM_S8_UINT
+                                                                               : VK_FORMAT_D32_SFLOAT_S8_UINT;
     if (!supports(depth_fmt_, target)) {
         LOGE("vulkan: no depth and stencil format to draw into");
         return false;
@@ -3563,6 +3569,15 @@ void VulkanBackend::UploadConstants(const State& s, const DrawShaders& sh, const
         last_vc_ok_ = true;
     }
     FillSurfaceConstants(s, size, c);
+    // a float depth buffer (no D24S8, AMD) keeps what the console's integer one rounds away: the loading screen's
+    // copy of the front buffer at z 0.1 failed LESSEQUAL over its text at z 0, and the text went missing, boxes in
+    // its place. A negative 1 / depth scale has the vertex shader round z to whole console steps first
+    // (XBE_DEPTH_ROUND=0 keeps the float values, to compare)
+    static const bool depth_round = [] {
+        const char* e = std::getenv("XBE_DEPTH_ROUND");
+        return !(e && e[0] == '0');
+    }();
+    if (depth_round && depth_fmt_ != VK_FORMAT_D24_UNORM_S8_UINT) c.surf[2] = -c.surf[2];
     // points: host pixels per console pixel, also keeps them off the far edge pull out of screen passes
     if (k.topo == uint32_t(Topology::Points)) {
         c.surf[3] = PointScale();

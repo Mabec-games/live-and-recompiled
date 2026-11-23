@@ -254,7 +254,8 @@ const char* kVsEpilogue = R"(
     if (surf.w == 0 && abs(p.y - (surf.y - 0.5)) < 1e-3) p.y = surf.y;
     q.x = p.x * 2 / surf.x - 1;
     q.y = 1 - p.y * 2 / surf.y;
-    q.z = p.z * surf.z;
+    // surf.z negative: the depth buffer is float, z rounded to the console's integer steps as its own buffer would
+    q.z = (surf.z < 0 ? round(p.z) : p.z) * abs(surf.z);
     q.xyz *= p.w;
     q.w = p.w;
     o.pos = q;
@@ -884,7 +885,7 @@ std::string FixedVertexHlsl(uint16_t regs, bool pretransformed, uint64_t decode,
     if (pretransformed) {
         s += "    float4 rhw = " + v(0, "float4(0,0,0,1)") + ";\n";
         s += "    float w = rhw.w == 0 ? 1 : 1 / rhw.w;\n";
-        s += "    oPos = float4(rhw.xy, rhw.z / surf.z, w);\n";
+        s += "    oPos = float4(rhw.xy, rhw.z / abs(surf.z), w);\n";
     } else {
         s += "    float4 ip = float4(" + v(0, "float4(0,0,0,1)") + ".xyz, 1);\n";
         s += "    float4 cp = mul(ip, wvp);\n";
